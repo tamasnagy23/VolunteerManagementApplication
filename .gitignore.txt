@@ -1,0 +1,18 @@
+# IntelliJ files
+.idea/
+*.iml
+out/
+
+# Java / Maven
+target/
+*.class
+.mvn/
+mvnw
+mvnw.cmd
+
+# Node / Frontend
+node_modules/
+dist/
+build/
+.env.local
+.DS_Store

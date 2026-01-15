@@ -1,0 +1,35 @@
+version: '3.8'
+
+services:
+  # --- ADATBÁZIS ---
+  db:
+    image: postgres:15-alpine
+    container_name: volunteer_db
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=password
+      - POSTGRES_DB=volunteer_db
+    ports:
+      - "5432:5432" # Kívülről is elérhető legyen (fejlesztéshez)
+    volumes:
+      - db_data:/var/lib/postgresql/data # Hogy ne vesszenek el az adatok újraindításkor!
+    restart: always
+
+  # --- BACKEND ALKALMAZÁS ---
+  app:
+    build: . # A jelenlegi mappában lévő Dockerfile-t használja
+    container_name: volunteer_backend
+    ports:
+      - "8080:8080"
+    environment:
+      # Fontos: A 'db' hostnév a fenti service nevéből jön!
+      - SPRING_DATASOURCE_URL=jdbc:postgresql://db:5432/volunteer_db
+      - SPRING_DATASOURCE_USERNAME=postgres
+      - SPRING_DATASOURCE_PASSWORD=password
+      - SPRING_JPA_HIBERNATE_DDL_AUTO=update # Fejlesztéshez jó, élesben 'validate'
+    depends_on:
+      - db # Megvárja, amíg a db elindul
+    restart: always
+
+volumes:
+  db_data:
