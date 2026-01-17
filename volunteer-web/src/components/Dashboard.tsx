@@ -1,9 +1,13 @@
 import { useEffect, useState } from 'react';
-// KIVETTÜK A GRID-et, helyette Box-ot használunk
-import { Container, Typography, Card, CardContent, Button, Box } from '@mui/material';
+import {
+    Container, Typography, Card, CardContent, Button, Box,
+    CardActions, Chip, CircularProgress
+} from '@mui/material';
 import api from '../api/axios';
 import { useNavigate } from 'react-router-dom';
 import AddIcon from '@mui/icons-material/Add';
+import GroupIcon from '@mui/icons-material/Group';
+import CalendarTodayIcon from '@mui/icons-material/CalendarToday';
 
 interface Shift {
     id: number;
@@ -21,80 +25,147 @@ interface Event {
 
 export default function Dashboard() {
     const [events, setEvents] = useState<Event[]>([]);
+    const [userRole, setUserRole] = useState<string>("");
+    const [loading, setLoading] = useState<boolean>(true);
     const navigate = useNavigate();
 
-    // JAVÍTÁS 1: A függvényt a useEffect-en BELÜL hozzuk létre.
-    // Így az ESLint és a React is boldog, nincs "cascade render" hiba.
     useEffect(() => {
-        const fetchEvents = async () => {
+        const fetchData = async () => {
             try {
-                const response = await api.get('/events');
-                const content = response.data.content || [];
-                setEvents(content);
+                setLoading(true);
+                const [eventsResponse, userResponse] = await Promise.all([
+                    api.get('/events'),
+                    api.get('/users/me')
+                ]);
+
+                setEvents(eventsResponse.data.content || eventsResponse.data || []);
+                setUserRole(userResponse.data.role);
             } catch (error) {
-                console.error("Hiba a lekéréskor:", error);
+                console.error("Hiba az adatok betöltésekor:", error);
+            } finally {
+                setLoading(false);
             }
         };
+        fetchData();
+    }, []);
 
-        fetchEvents();
-    }, []); // Az üres tömb [] jelenti, hogy csak egyszer fut le az oldal betöltésekor.
-
-    const handleLogout = () => {
-        localStorage.removeItem('token');
-        navigate('/');
+    const formatDate = (dateString: string) => {
+        if (!dateString) return '';
+        return new Date(dateString).toLocaleDateString('hu-HU', {
+            month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
+        });
     };
 
+    // --- JOGOSULTSÁGOK ---
+    // 1. SZINT: Admin/Szervező (Csapat, Új esemény)
+    const isAdminOrOrganizer = ['SYS_ADMIN', 'ORGANIZER'].includes(userRole);
+
+    // 2. SZINT: Koordinátor is (Jelentkezők kezelése)
+    const canManageApplications = ['SYS_ADMIN', 'ORGANIZER', 'COORDINATOR'].includes(userRole);
+    // ---------------------
+
+    if (loading) {
+        return (
+            <Box display="flex" justifyContent="center" alignItems="center" minHeight="80vh">
+                <CircularProgress />
+            </Box>
+        );
+    }
+
     return (
-        <Container sx={{ mt: 4 }}>
-            <Box display="flex" justifyContent="space-between" alignItems="center" mb={4}>
-                <Typography variant="h4">
-                    Elérhető Események
-                </Typography>
+        <Container sx={{ mt: 4, mb: 4 }}>
+            {/* FEJLÉC */}
+            <Box display="flex" justifyContent="space-between" alignItems="center" mb={4} flexWrap="wrap" gap={2}>
+                <Typography variant="h4">Elérhető Események</Typography>
 
                 <Box>
-                    <Button
-                        variant="contained"
-                        color="primary"
-                        startIcon={<AddIcon />}
-                        onClick={() => navigate('/create-event')}
-                        sx={{ mr: 2 }}
-                    >
-                        Új Esemény
-                    </Button>
+                    {/* A navigációs gombok (Saját műszak, Kijelentkezés) INNEN TÖRÖLVE LETTEK,
+                        mert már a Layout menüsorában vannak. */}
 
-                    <Button variant="outlined" color="secondary" onClick={handleLogout}>
-                        Kijelentkezés
-                    </Button>
+                    {/* --- CSAK ADMIN ÉS SZERVEZŐ GOMBOK --- */}
+                    {/* Ezek maradnak itt, mert ezek "műveletek", nem navigáció */}
+                    {isAdminOrOrganizer && (
+                        <>
+                            <Button
+                                variant="outlined"
+                                color="primary"
+                                startIcon={<GroupIcon />}
+                                onClick={() => navigate('/team')}
+                                sx={{ mr: 2 }}
+                            >
+                                Csapat Kezelése
+                            </Button>
+
+                            <Button
+                                variant="contained"
+                                color="primary"
+                                startIcon={<AddIcon />}
+                                onClick={() => navigate('/create-event')}
+                            >
+                                Új Esemény
+                            </Button>
+                        </>
+                    )}
                 </Box>
             </Box>
 
+            {/* ESEMÉNYEK LISTÁZÁSA */}
             {events.length === 0 ? (
-                <Typography>Még nincsenek események feltöltve.</Typography>
+                <Typography align="center" color="text.secondary">Még nincsenek események feltöltve.</Typography>
             ) : (
-                /* JAVÍTÁS 2: Grid helyett Flexbox-ot használunk (Box)
-                   Ez nem függ a verzióktól, mindig működik. */
                 <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 3 }}>
                     {events.map((event) => (
-                        <Box
-                            key={event.id}
-                            sx={{
-                                // Mobilokon 100% szélesség, asztali gépen kb 3 kártya férjen el
-                                width: { xs: '100%', md: '30%', lg: '30%' },
-                                flexGrow: 1
-                            }}
-                        >
+                        <Box key={event.id} sx={{ width: { xs: '100%', md: '30%', lg: '30%' }, flexGrow: 1 }}>
                             <Card elevation={3} sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
-                                <CardContent>
-                                    <Typography variant="h6" component="div" gutterBottom>
-                                        {event.title}
-                                    </Typography>
-                                    <Typography sx={{ mb: 1.5 }} color="text.secondary" fontWeight="bold">
-                                        📍 {event.location}
-                                    </Typography>
-                                    <Typography variant="body2" color="text.secondary">
+                                <CardContent sx={{ flexGrow: 1 }}>
+                                    <Typography variant="h6" component="div" gutterBottom>{event.title}</Typography>
+                                    <Box display="flex" alignItems="center" mb={1} gap={1}>
+                                        <Typography variant="body2" color="text.secondary" fontWeight="bold">📍 {event.location}</Typography>
+                                    </Box>
+
+                                    {event.shifts && event.shifts.length > 0 && (
+                                        <Chip
+                                            icon={<CalendarTodayIcon />}
+                                            label={formatDate(event.shifts[0].startTime)}
+                                            size="small"
+                                            color="primary"
+                                            variant="outlined"
+                                            sx={{ mb: 2 }}
+                                        />
+                                    )}
+
+                                    <Typography variant="body2" color="text.secondary" sx={{ overflow: 'hidden', textOverflow: 'ellipsis', display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical' }}>
                                         {event.description}
                                     </Typography>
                                 </CardContent>
+
+                                {/* Részletek gomb */}
+                                <CardActions>
+                                    <Button
+                                        size="small"
+                                        fullWidth
+                                        variant="contained"
+                                        onClick={() => navigate(`/events/${event.id}`)}
+                                    >
+                                        Részletek és Jelentkezés
+                                    </Button>
+                                </CardActions>
+
+                                {/* Jelentkezők kezelése gomb (Koordinátoroknak is) */}
+                                {canManageApplications && (
+                                    <CardActions sx={{ borderTop: '1px solid #eee', pt: 1, pb: 2, px: 1 }}>
+                                        <Button
+                                            size="small"
+                                            color="secondary"
+                                            variant="outlined"
+                                            fullWidth
+                                            startIcon={<GroupIcon />}
+                                            onClick={() => navigate(`/events/${event.id}/applications`)}
+                                        >
+                                            Jelentkezők kezelése
+                                        </Button>
+                                    </CardActions>
+                                )}
                             </Card>
                         </Box>
                     ))}

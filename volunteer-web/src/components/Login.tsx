@@ -1,7 +1,7 @@
 import { useState } from 'react';
-import { Box, Button, TextField, Typography, Paper, Container } from '@mui/material';
-import api from '../api/axios'; // Az előbb létrehozott postásunk
-import { useNavigate } from 'react-router-dom'; // <--- ÚJ
+import { Box, Button, TextField, Typography, Paper, Container, Alert } from '@mui/material';
+import api from '../api/axios';
+import { useNavigate } from 'react-router-dom';
 
 export default function Login() {
     const navigate = useNavigate();
@@ -10,22 +10,32 @@ export default function Login() {
     const [error, setError] = useState('');
 
     const handleLogin = async (e: React.FormEvent) => {
-        e.preventDefault(); // Ne töltse újra az oldalt
+        e.preventDefault();
         setError('');
 
         try {
-            // Elküldjük az adatokat a Backendnek
-            const response = await api.post('/auth/login', { email, password });
+            // FONTOS: A backend endpoint neve '/authenticate' volt a Controllerben!
+            const response = await api.post('/auth/authenticate', { email, password });
 
-            // Ha sikerült, megkapjuk a tokent
-            console.log("Sikeres belépés:", response.data);
+            // Itt vesszük ki a tokent ÉS a szerepkört (role)
+            const { token, role } = response.data;
 
-            // Elmentjük a böngészőbe a tokent
-            localStorage.setItem('token', response.data.token);
+            console.log("Sikeres belépés:", role); // Debug: lássuk a konzolon ki lépett be
 
-            //alert('Sikeres bejelentkezés! Token elmentve.');
-            navigate('/events');
-        } catch (err) {
+            // Elmentjük mindkettőt a böngészőbe
+            localStorage.setItem('token', token);
+            localStorage.setItem('role', role); // <--- EZ AZ ÚJ RÉSZ
+
+            // Beállítjuk az Axiosnak a tokent a további kérésekhez
+            api.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+
+            navigate('/dashboard');
+
+            // Egy apró trükk: frissítjük az oldalt, hogy az App.tsx és a menü
+            // biztosan érzékelje az új jogosultságokat.
+            window.location.reload();
+
+        } catch (err: any) {
             console.error(err);
             setError('Hibás email vagy jelszó!');
         }
@@ -45,6 +55,9 @@ export default function Login() {
                     <Typography component="h1" variant="h5">
                         Bejelentkezés
                     </Typography>
+
+                    {/* Hibaüzenet szebben megjelenítve */}
+                    {error && <Alert severity="error" sx={{ mt: 2, width: '100%' }}>{error}</Alert>}
 
                     <Box component="form" onSubmit={handleLogin} sx={{ mt: 1, width: '100%' }}>
                         <TextField
@@ -66,12 +79,6 @@ export default function Login() {
                             onChange={(e) => setPassword(e.target.value)}
                         />
 
-                        {error && (
-                            <Typography color="error" variant="body2" sx={{ mt: 1 }}>
-                                {error}
-                            </Typography>
-                        )}
-
                         <Button
                             type="submit"
                             fullWidth
@@ -79,6 +86,9 @@ export default function Login() {
                             sx={{ mt: 3, mb: 2 }}
                         >
                             Belépés
+                        </Button>
+                        <Button fullWidth color="secondary" onClick={() => navigate('/register')}>
+                            Nincs fiókod? Regisztráció
                         </Button>
                     </Box>
                 </Paper>

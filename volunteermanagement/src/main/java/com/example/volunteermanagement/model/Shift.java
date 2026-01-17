@@ -1,25 +1,41 @@
 package com.example.volunteermanagement.model;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import jakarta.persistence.*;
 import lombok.*;
-import java.time.LocalDateTime;
 
-@Entity
-@Getter @Setter
-@NoArgsConstructor @AllArgsConstructor
+import java.time.LocalDateTime;
+import java.util.HashSet;
+import java.util.Set;
+
+@Data
 @Builder
-@Table(name = "shifts")
+@NoArgsConstructor
+@AllArgsConstructor
+@Entity
 public class Shift {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
+    private String name;
+
     private LocalDateTime startTime;
     private LocalDateTime endTime;
-    private int maxVolunteers; // Hány ember kell?
 
-    @ManyToOne(fetch = FetchType.LAZY)
+    // --- VÁLTOZÁS: Egy ember helyett (assignedUser) most TÖBB ember (volunteers) ---
+    @ManyToMany
+    @JoinTable(
+            name = "shift_assignments",
+            joinColumns = @JoinColumn(name = "shift_id"),
+            inverseJoinColumns = @JoinColumn(name = "user_id")
+    )
+    private Set<User> volunteers = new HashSet<>();
+    // -------------------------------------------------------------------------------
+
+    @ManyToOne
     @JoinColumn(name = "event_id")
+    @JsonIgnore
     private Event event;
 }

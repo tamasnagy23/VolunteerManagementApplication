@@ -1,6 +1,7 @@
 package com.example.volunteermanagement.model;
 
 import com.fasterxml.jackson.annotation.JsonFormat; // <--- EZT NE FELEJTSD EL!
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import jakarta.persistence.*;
 import lombok.*;
 import java.time.LocalDateTime;
@@ -19,10 +20,14 @@ public class Event {
     private Long id;
 
     private String title;
+    @Column(columnDefinition = "TEXT")
     private String description;
     private String location;
 
-    // --- AZ ÚJ MEZŐK, AMIK HIÁNYOZTAK ---
+    @ManyToOne
+    @JoinColumn(name = "organization_id")
+    @JsonIgnore // Hogy ne legyen körkörös hivatkozás
+    private Organization organization;
 
     // Ez mondja meg a Javanak, hogyan olvassa be a "2026-06-01T10:00:00" szöveget
     @JsonFormat(pattern = "yyyy-MM-dd'T'HH:mm:ss")

@@ -1,6 +1,8 @@
 package com.example.volunteermanagement.model;
 
 public enum Role {
-    ADMIN,      // Szervező: Eseményeket hozhat létre, jelentkezéseket bírálhat el
-    VOLUNTEER   // Önkéntes: Csak jelentkezhet és a saját profilját szerkesztheti
+    SYS_ADMIN,    // Rendszergazda (Mindent lát, minden szervezet felett áll)
+    ORGANIZER,    // Szervező (Egy szervezet vezetője)
+    COORDINATOR,  // Koordinátor (Műszakokat kezel)
+    VOLUNTEER     // Önkéntes (Csak jelentkezik)
 }
