@@ -1,18 +1,20 @@
 import { useEffect, useState } from 'react';
 import {
-    Container, Typography, Card, CardContent, Button, Box,
-    CardActions, Chip, CircularProgress
+    Container, Typography, Button, Box,
+    CircularProgress, Divider, Paper, Alert
 } from '@mui/material';
 import api from '../api/axios';
 import { useNavigate } from 'react-router-dom';
 import AddIcon from '@mui/icons-material/Add';
 import GroupIcon from '@mui/icons-material/Group';
-import CalendarTodayIcon from '@mui/icons-material/CalendarToday';
+import EventCard from "./EventCard";
 
+// --- INTERFÉSZEK ---
 interface Shift {
     id: number;
     startTime: string;
     endTime: string;
+    maxVolunteers: number;
 }
 
 interface Event {
@@ -21,12 +23,30 @@ interface Event {
     description: string;
     location: string;
     shifts: Shift[];
+    organization?: {
+        id: number;
+        name: string;
+    };
+}
+
+interface UserProfile {
+    name: string;
+    role: string;
+    memberships: {
+        orgId?: number;                // A DTO ezt küldi
+        orgName?: string;              // A DTO ezt küldi
+        orgRole?: string;              // <--- A DTO EZT KÜLDI (Ez hiányzott!)
+        organization?: { id: number; name: string }; // Megtartjuk a biztonság kedvéért
+        role?: string;                 // Régi mező
+        status: string;
+    }[];
 }
 
 export default function Dashboard() {
     const [events, setEvents] = useState<Event[]>([]);
-    const [userRole, setUserRole] = useState<string>("");
+    const [user, setUser] = useState<UserProfile | null>(null);
     const [loading, setLoading] = useState<boolean>(true);
+    const [error, setError] = useState('');
     const navigate = useNavigate();
 
     useEffect(() => {
@@ -37,11 +57,12 @@ export default function Dashboard() {
                     api.get('/events'),
                     api.get('/users/me')
                 ]);
-
-                setEvents(eventsResponse.data.content || eventsResponse.data || []);
-                setUserRole(userResponse.data.role);
+                const eventData = eventsResponse.data.content || eventsResponse.data || [];
+                setEvents(eventData);
+                setUser(userResponse.data);
             } catch (error) {
                 console.error("Hiba az adatok betöltésekor:", error);
+                setError('Nem sikerült betölteni az adatokat.');
             } finally {
                 setLoading(false);
             }
@@ -49,20 +70,26 @@ export default function Dashboard() {
         fetchData();
     }, []);
 
-    const formatDate = (dateString: string) => {
-        if (!dateString) return '';
-        return new Date(dateString).toLocaleDateString('hu-HU', {
-            month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
-        });
-    };
+    // Jogosultságok
+    const isLeader = !!user && (user.role === 'SYS_ADMIN' ||
+        user.memberships?.some(m =>
+            ['OWNER', 'ORGANIZER'].includes(m.orgRole || m.role || '') &&
+            m.status === 'APPROVED'
+        ));
 
-    // --- JOGOSULTSÁGOK ---
-    // 1. SZINT: Admin/Szervező (Csapat, Új esemény)
-    const isAdminOrOrganizer = ['SYS_ADMIN', 'ORGANIZER'].includes(userRole);
+    const canManageApplications = !!user && (user.role === 'SYS_ADMIN' ||
+        user.memberships?.some(m =>
+            ['OWNER', 'ORGANIZER', 'COORDINATOR'].includes(m.orgRole || m.role || '') &&
+            m.status === 'APPROVED'
+        ));
 
-    // 2. SZINT: Koordinátor is (Jelentkezők kezelése)
-    const canManageApplications = ['SYS_ADMIN', 'ORGANIZER', 'COORDINATOR'].includes(userRole);
-    // ---------------------
+    // --- CSOPORTOSÍTÓ LOGIKA ---
+    const groupedEvents = events.reduce((acc, event) => {
+        const orgName = event.organization?.name || 'Egyéb';
+        if (!acc[orgName]) acc[orgName] = [];
+        acc[orgName].push(event);
+        return acc;
+    }, {} as Record<string, Event[]>);
 
     if (loading) {
         return (
@@ -73,103 +100,82 @@ export default function Dashboard() {
     }
 
     return (
-        <Container sx={{ mt: 4, mb: 4 }}>
-            {/* FEJLÉC */}
-            <Box display="flex" justifyContent="space-between" alignItems="center" mb={4} flexWrap="wrap" gap={2}>
-                <Typography variant="h4">Elérhető Események</Typography>
-
-                <Box>
-                    {/* A navigációs gombok (Saját műszak, Kijelentkezés) INNEN TÖRÖLVE LETTEK,
-                        mert már a Layout menüsorában vannak. */}
-
-                    {/* --- CSAK ADMIN ÉS SZERVEZŐ GOMBOK --- */}
-                    {/* Ezek maradnak itt, mert ezek "műveletek", nem navigáció */}
-                    {isAdminOrOrganizer && (
-                        <>
-                            <Button
-                                variant="outlined"
-                                color="primary"
-                                startIcon={<GroupIcon />}
-                                onClick={() => navigate('/team')}
-                                sx={{ mr: 2 }}
-                            >
-                                Csapat Kezelése
-                            </Button>
-
-                            <Button
-                                variant="contained"
-                                color="primary"
-                                startIcon={<AddIcon />}
-                                onClick={() => navigate('/create-event')}
-                            >
-                                Új Esemény
-                            </Button>
-                        </>
-                    )}
-                </Box>
+        <Container maxWidth="lg" sx={{ mt: 4, mb: 8 }}>
+            <Box mb={4}>
+                <Typography variant="h4" fontWeight="bold" gutterBottom>
+                    Szia, {user?.name}! 👋
+                </Typography>
+                <Typography variant="body1" color="text.secondary">
+                    {isLeader
+                        ? "Kezeld a szervezeted eseményeit és önkénteseit egy helyen."
+                        : "Böngészd a szervezetid aktuális eseményeit!"}
+                </Typography>
             </Box>
 
-            {/* ESEMÉNYEK LISTÁZÁSA */}
-            {events.length === 0 ? (
-                <Typography align="center" color="text.secondary">Még nincsenek események feltöltve.</Typography>
-            ) : (
-                <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 3 }}>
-                    {events.map((event) => (
-                        <Box key={event.id} sx={{ width: { xs: '100%', md: '30%', lg: '30%' }, flexGrow: 1 }}>
-                            <Card elevation={3} sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
-                                <CardContent sx={{ flexGrow: 1 }}>
-                                    <Typography variant="h6" component="div" gutterBottom>{event.title}</Typography>
-                                    <Box display="flex" alignItems="center" mb={1} gap={1}>
-                                        <Typography variant="body2" color="text.secondary" fontWeight="bold">📍 {event.location}</Typography>
-                                    </Box>
+            {error && <Alert severity="error" sx={{ mb: 3 }}>{error}</Alert>}
 
-                                    {event.shifts && event.shifts.length > 0 && (
-                                        <Chip
-                                            icon={<CalendarTodayIcon />}
-                                            label={formatDate(event.shifts[0].startTime)}
-                                            size="small"
-                                            color="primary"
-                                            variant="outlined"
-                                            sx={{ mb: 2 }}
-                                        />
-                                    )}
-
-                                    <Typography variant="body2" color="text.secondary" sx={{ overflow: 'hidden', textOverflow: 'ellipsis', display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical' }}>
-                                        {event.description}
-                                    </Typography>
-                                </CardContent>
-
-                                {/* Részletek gomb */}
-                                <CardActions>
-                                    <Button
-                                        size="small"
-                                        fullWidth
-                                        variant="contained"
-                                        onClick={() => navigate(`/events/${event.id}`)}
-                                    >
-                                        Részletek és Jelentkezés
-                                    </Button>
-                                </CardActions>
-
-                                {/* Jelentkezők kezelése gomb (Koordinátoroknak is) */}
-                                {canManageApplications && (
-                                    <CardActions sx={{ borderTop: '1px solid #eee', pt: 1, pb: 2, px: 1 }}>
-                                        <Button
-                                            size="small"
-                                            color="secondary"
-                                            variant="outlined"
-                                            fullWidth
-                                            startIcon={<GroupIcon />}
-                                            onClick={() => navigate(`/events/${event.id}/applications`)}
-                                        >
-                                            Jelentkezők kezelése
-                                        </Button>
-                                    </CardActions>
-                                )}
-                            </Card>
-                        </Box>
-                    ))}
+            {/* --- VEZETŐI GOMBOK: Kikerültek a feltétel elé, mindig látszanak a vezetőnek --- */}
+            {isLeader && (
+                <Box display="flex" gap={2} mb={4}>
+                    <Button
+                        variant="contained"
+                        startIcon={<AddIcon />}
+                        onClick={() => navigate('/create-event')}
+                        sx={{ borderRadius: 2, px: 3 }}
+                    >
+                        Új Esemény Létrehozása
+                    </Button>
+                    <Button
+                        variant="outlined"
+                        startIcon={<GroupIcon />}
+                        onClick={() => navigate('/team')}
+                        sx={{ borderRadius: 2, px: 3 }}
+                    >
+                        Csapat és Jelentkezők
+                    </Button>
                 </Box>
+            )}
+
+            <Divider sx={{ mb: 4 }} />
+
+            {/* --- ESEMÉNYEK LISTÁZÁSA --- */}
+            {events.length === 0 ? (
+                <Paper sx={{ p: 4, textAlign: 'center', bgcolor: '#f9f9f9', mt: 2 }}>
+                    <Typography variant="h6" color="text.secondary" gutterBottom>
+                        {isLeader
+                            ? "Még nem hoztál létre eseményt."
+                            : "Még nincsenek itt események."}
+                    </Typography>
+                    <Typography variant="body2" color="text.secondary">
+                        {isLeader
+                            ? "Kattints az 'Új Esemény' gombra a kezdéshez!"
+                            : "Csatlakozz egy szervezethez a Szervezetek menüpontban, vagy várj a jóváhagyásra!"}
+                    </Typography>
+                </Paper>
+            ) : (
+                // Itt jön a csoportosított listázás (Object.entries(groupedEvents)...)
+                Object.entries(groupedEvents).map(([orgName, orgEvents]) => (
+                    <Box key={orgName} sx={{ mb: 6 }}>
+                        <Typography variant="h5" sx={{ mb: 3, fontWeight: 'bold', borderBottom: '2px solid #1976d2', display: 'inline-block', pb: 1 }}>
+                            {orgName}
+                        </Typography>
+
+                        <Box
+                            display="grid"
+                            gridTemplateColumns={{ xs: '1fr', sm: 'repeat(2, 1fr)', md: 'repeat(3, 1fr)' }}
+                            gap={3}
+                        >
+                            {orgEvents.map((event) => (
+                                <EventCard
+                                    key={event.id}
+                                    event={event}
+                                    isLeader={isLeader}
+                                    canManageApplications={canManageApplications}
+                                />
+                            ))}
+                        </Box>
+                    </Box>
+                ))
             )}
         </Container>
     );

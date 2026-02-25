@@ -21,6 +21,8 @@ public class Shift {
 
     private String name;
 
+    private Integer maxVolunteers;
+
     private LocalDateTime startTime;
     private LocalDateTime endTime;
 

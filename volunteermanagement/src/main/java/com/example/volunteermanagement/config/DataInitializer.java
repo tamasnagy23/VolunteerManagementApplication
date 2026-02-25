@@ -1,10 +1,7 @@
 package com.example.volunteermanagement.config;
 
 import com.example.volunteermanagement.model.*;
-import com.example.volunteermanagement.repository.EventRepository;
-import com.example.volunteermanagement.repository.OrganizationRepository;
-import com.example.volunteermanagement.repository.UserRepository;
-import com.example.volunteermanagement.repository.WorkAreaRepository;
+import com.example.volunteermanagement.repository.*;
 import lombok.RequiredArgsConstructor;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -18,42 +15,51 @@ public class DataInitializer implements CommandLineRunner {
 
     private final UserRepository userRepository;
     private final OrganizationRepository organizationRepository;
+    // --- ÚJ REPOSITORY A TAGSÁGOKHOZ ---
+    private final OrganizationMemberRepository organizationMemberRepository;
     private final PasswordEncoder passwordEncoder;
     private final EventRepository eventRepository;
     private final WorkAreaRepository workAreaRepository;
 
     @Override
     public void run(String... args) throws Exception {
-        // Csak akkor fut le, ha még nincs szervezet az adatbázisban
         if (organizationRepository.count() == 0) {
 
-            // 1. Létrehozunk egy Szervezetet
+            // 1. Szervezet létrehozása
             Organization org = Organization.builder()
                     .name("Sziget Fesztivál Szervezőiroda")
                     .inviteCode("SZIGET2026")
                     .build();
             organizationRepository.save(org);
 
-            // 2. Létrehozunk egy Szervezőt (ORGANIZER) - Ő tartozik a szervezethez
+            // 2. Felhasználó létrehozása (Globálisan most már csak USER!)
             User organizer = User.builder()
                     .name("Főszervező Ferenc")
                     .email("admin@sziget.hu")
                     .password(passwordEncoder.encode("password"))
-                    .role(Role.ORGANIZER)
-                    .organization(org) // Neki beállítjuk a szervezetet
+                    .role(Role.USER) // JAVÍTÁS: ORGANIZER helyett USER
                     .build();
             userRepository.save(organizer);
 
-            // 3. Létrehozunk egy Rendszergazdát (SYS_ADMIN) - Neki NINCS szervezete
+            // 3. Összekötés: Itt kapja meg a tényleges hatalmát (OWNER rang a szervezetben)
+            OrganizationMember membership = OrganizationMember.builder()
+                    .user(organizer)
+                    .organization(org)
+                    .role(OrganizationRole.OWNER)
+                    .joinedAt(LocalDateTime.now())
+                    .build();
+            organizationMemberRepository.save(membership);
+
+            // 4. Rendszergazda (SYS_ADMIN marad, mert ez egy globális rang)
             User sysAdmin = User.builder()
                     .name("Super Admin")
                     .email("sysadmin@test.com")
                     .password(passwordEncoder.encode("admin123"))
                     .role(Role.SYS_ADMIN)
-                    .organization(null) // Ez a kulcs! Mivel a @JoinColumn engedi a NULL-t.
                     .build();
             userRepository.save(sysAdmin);
 
+            // --- ESEMÉNYEK ÉS MUNKATERÜLETEK ---
             Event szigetEvent = Event.builder()
                     .title("Sziget Fesztivál 2026")
                     .description("A szabadság szigete")
@@ -64,24 +70,15 @@ public class DataInitializer implements CommandLineRunner {
                     .build();
             eventRepository.save(szigetEvent);
 
-            // 5. Létrehozunk Munkaterületeket az eseményhez
+            // Itt korábban WorkArea-t használtál, de a legutóbbi Service kódunkban Shift-eket emlegettünk.
+            // Ha még WorkArea a modelled, ez maradjon így:
             WorkArea bar = WorkArea.builder()
                     .name("Pultos")
                     .description("Italok kiszolgálása a nagyszínpadnál")
                     .event(szigetEvent)
                     .build();
-            workAreaRepository.save(bar); // Kell hozzá: private final WorkAreaRepository workAreaRepository;
-
-            WorkArea security = WorkArea.builder()
-                    .name("Jegyellenőr")
-                    .description("Karszalagok ellenőrzése a bejáratnál")
-                    .event(szigetEvent)
-                    .build();
-            workAreaRepository.save(security);
+            workAreaRepository.save(bar);
 
             System.out.println("--- DEMO ADATOK LÉTREHOZVA ---");
-            System.out.println("Szervező: admin@sziget.hu / password");
-            System.out.println("Rendszergazda: sysadmin@test.com / admin123");
         }
-    }
-}
+    }}

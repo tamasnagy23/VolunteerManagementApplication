@@ -7,10 +7,11 @@ import lombok.*;
 import java.util.ArrayList;
 import java.util.List;
 
-@Entity
-@Getter @Setter
-@NoArgsConstructor @AllArgsConstructor
+@Data
 @Builder
+@NoArgsConstructor
+@AllArgsConstructor
+@Entity
 @Table(name = "organizations")
 public class Organization {
 
@@ -19,19 +20,26 @@ public class Organization {
     private Long id;
 
     @Column(nullable = false, unique = true)
-    private String name; // Pl. "Sziget Kulturális Iroda"
+    private String name;
 
-    // Egyedi azonosító kód a meghívókhoz (pl. "SZIGET2026")
+    private String address;
+
+    @Column(unique = true)
+    private String cui; // Adószám / Cégjegyzékszám
+
     @Column(unique = true)
     private String inviteCode;
 
-    // Kapcsolat: Egy szervezetnek sok tagja (User) van
-    @OneToMany(mappedBy = "organization", cascade = CascadeType.ALL)
+    // --- KAPCSOLAT A TAGSÁGOKKAL ---
+    @Builder.Default
+    @OneToMany(mappedBy = "organization", cascade = CascadeType.ALL, orphanRemoval = true)
     @JsonIgnore
-    private List<User> members = new ArrayList<>();
+    private List<OrganizationMember> members = new ArrayList<>();
 
-    // Kapcsolat: Egy szervezetnek sok eseménye van
-    @OneToMany(mappedBy = "organization", cascade = CascadeType.ALL)
-    @JsonIgnore
-    private List<Event> events = new ArrayList<>();
+    @Column(columnDefinition = "TEXT")
+    private String description;
+
+    private String email;
+
+    private String phone;
 }

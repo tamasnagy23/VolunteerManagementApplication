@@ -31,7 +31,7 @@ public class EventController {
 
     @GetMapping
     // Itt is hozzáadjuk a 'Principal' paramétert
-    public ResponseEntity<Page<Event>> getAllEvents(Pageable pageable, Principal principal) {
+    public ResponseEntity<Page<EventDTO>> getAllEvents(Pageable pageable, Principal principal) {
         // Átadjuk a nevet a service-nek, hogy tudjon szűrni
         return ResponseEntity.ok(eventService.getAllEvents(pageable, principal.getName()));
     }
@@ -45,5 +45,17 @@ public class EventController {
     @GetMapping("/my-shifts")
     public ResponseEntity<List<ShiftDTO>> getUserShifts(Principal principal) {
         return ResponseEntity.ok(eventService.getUserShifts(principal.getName()));
+    }
+
+    @PutMapping("/{id}")
+    public ResponseEntity<Event> updateEvent(@PathVariable Long id, @RequestBody EventDTO eventDTO) {
+        // Itt meghívjuk a szervizt, amit mindjárt megírunk
+        return ResponseEntity.ok(eventService.updateEvent(id, eventDTO));
+    }
+
+    @DeleteMapping("/{id}")
+    public ResponseEntity<Void> deleteEvent(@PathVariable Long id) {
+        eventService.deleteEvent(id);
+        return ResponseEntity.noContent().build(); // 204 No Content a sikeres törlés jele
     }
 }

@@ -1,9 +1,10 @@
 package com.example.volunteermanagement.controller;
 
-import com.example.volunteermanagement.model.Organization;
+import com.example.volunteermanagement.dto.TeamMemberDTO;
 import com.example.volunteermanagement.model.Role;
 import com.example.volunteermanagement.model.User;
 import com.example.volunteermanagement.repository.UserRepository;
+import com.example.volunteermanagement.service.UserService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -20,76 +21,72 @@ import java.util.List;
 public class UserController {
 
     private final UserRepository userRepository;
+    private final UserService userService;
 
+    // 1. Összes felhasználó lekérése (Csak SYS_ADMIN-nak)
     @GetMapping
-    @PreAuthorize("hasAnyAuthority('SYS_ADMIN', 'ORGANIZER')")
+    @PreAuthorize("hasAuthority('SYS_ADMIN')")
     public ResponseEntity<List<User>> getAllUsers() {
-        List<User> users = userRepository.findAll();
-        return ResponseEntity.ok(users);
+        return ResponseEntity.ok(userRepository.findAll());
     }
 
-    // Ez a végpont visszaadja a bejelentkezett felhasználó adatait (profil)
+    // 2. Saját profil adatai
     @GetMapping("/me")
-    public ResponseEntity<User> getCurrentUser(Principal principal) {
+    public ResponseEntity<com.example.volunteermanagement.dto.UserDTO> getCurrentUser(Principal principal) {
         User user = userRepository.findByEmail(principal.getName())
-                .orElseThrow(() -> new RuntimeException("Felhasználó nem található"));
-
-        return ResponseEntity.ok(user);
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Felhasználó nem található"));
+        return ResponseEntity.ok(userService.getCurrentUserProfile(principal.getName()));
     }
 
+    // 3. CSAPAT LEKÉRÉSE (Minden bejelentkezett láthatja, a szűrést a Service végzi!)
+    @GetMapping("/team")
+    @PreAuthorize("isAuthenticated()")
+    public ResponseEntity<List<TeamMemberDTO>> getTeamMembers(Principal principal) {
+        List<TeamMemberDTO> team = userService.getTeamMembers(principal.getName());
+        return ResponseEntity.ok(team);
+    }
+
+    // 4. GLOBÁLIS SZEREPKÖR MÓDOSÍTÁSA (Csak SYS_ADMIN vagy USER lehet!)
+    // Ezt már csak a legvégső esetben használjuk (pl. kinevezni egy új rendszert admint)
     @PutMapping("/{id}/role")
-    @PreAuthorize("hasAnyAuthority('SYS_ADMIN', 'ORGANIZER')")
-    public ResponseEntity<User> updateUserRole(@PathVariable Long id, @RequestParam String newRole, Principal principal) {
-
+    @PreAuthorize("hasAuthority('SYS_ADMIN')")
+    public ResponseEntity<User> updateGlobalRole(@PathVariable Long id, @RequestParam String newRole) {
         User userToUpdate = userRepository.findById(id)
-                .orElseThrow(() -> new RuntimeException("Felhasználó nem található: " + id));
-
-        User requester = userRepository.findByEmail(principal.getName())
-                .orElseThrow(() -> new RuntimeException("Bejelentkezett felhasználó nem található"));
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Felhasználó nem található"));
 
         Role newRoleEnum;
         try {
             newRoleEnum = Role.valueOf(newRole);
         } catch (IllegalArgumentException e) {
-            throw new RuntimeException("Érvénytelen szerepkör");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Érvénytelen globális szerepkör");
         }
 
-        // --- 1. BIZTONSÁGI VÉDELEM: UTOLSÓ RENDSZERGAZDA ---
-        // Ha a felhasználó jelenleg SYS_ADMIN, de az új szerep NEM az...
+        // Védelem az utolsó Rendszergazda ellen
         if (userToUpdate.getRole() == Role.SYS_ADMIN && newRoleEnum != Role.SYS_ADMIN) {
-            long sysAdminCount = userRepository.countByRole(Role.SYS_ADMIN);
-            if (sysAdminCount <= 1) {
-                // 400 Bad Request hibát dobunk
+            if (userRepository.countByRole(Role.SYS_ADMIN) <= 1) {
                 throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Nem fokozhatod le az utolsó Rendszergazdát!");
             }
         }
 
-        // --- 2. BIZTONSÁGI VÉDELEM: UTOLSÓ SZERVEZŐ (Adott Szervezetben) ---
-        // Ha a felhasználó jelenleg ORGANIZER, de az új szerep NEM az...
-        if (userToUpdate.getRole() == Role.ORGANIZER && newRoleEnum != Role.ORGANIZER) {
-            Organization org = userToUpdate.getOrganization();
-            if (org != null) {
-                long organizerCount = userRepository.countByOrganizationAndRole(org, Role.ORGANIZER);
-                if (organizerCount <= 1) {
-                    throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Nem fokozhatod le a szervezet utolsó Szervezőjét!");
-                }
-            }
-        }
-
-        // --- 3. JOGOSULTSÁG ELLENŐRZÉS (A korábbi kódod) ---
-        if (newRoleEnum == Role.SYS_ADMIN && requester.getRole() != Role.SYS_ADMIN) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Csak Rendszergazda nevezhet ki új Rendszergazdát!");
-        }
-
-        // ... (többi ellenőrzés ha van) ...
-
-        // Ha minden ellenőrzésen átment, mehet a mentés
         userToUpdate.setRole(newRoleEnum);
-        User updatedUser = userRepository.save(userToUpdate);
-
-        return ResponseEntity.ok(updatedUser);
+        return ResponseEntity.ok(userRepository.save(userToUpdate));
     }
-    // HA volt itt olyan metódus, ami a műszakokat adta vissza (és hibát dobott),
-    // azt most TÖRÖLTÜK, mert az EventController-ben lévő '/my-shifts' végpontot használjuk helyette!
-    // Ez így sokkal tisztább, és megszünteti a List vs Set konfliktust.
+
+    // 5. ÚJ: SZERVEZETI SZEREPKÖR MÓDOSÍTÁSA (Ez a lényeg!)
+    // Ezt fogja hívni a Frontend legördülő menüje
+    @PutMapping("/{userId}/organizations/{orgId}/role")
+    @PreAuthorize("isAuthenticated()")
+    public ResponseEntity<Void> updateOrganizationRole(
+            @PathVariable Long userId,
+            @PathVariable Long orgId,
+            @RequestParam String newRole,
+            Principal principal) {
+
+        try {
+            userService.updateOrganizationRole(userId, orgId, newRole, principal.getName());
+            return ResponseEntity.ok().build();
+        } catch (RuntimeException e) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, e.getMessage());
+        }
+    }
 }

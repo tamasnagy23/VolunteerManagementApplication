@@ -1,71 +1,48 @@
 package com.example.volunteermanagement.controller;
 
-import com.example.volunteermanagement.dto.UserDTO;
-import com.example.volunteermanagement.model.Role;
-import com.example.volunteermanagement.model.User;
-import com.example.volunteermanagement.repository.UserRepository;
+import com.example.volunteermanagement.dto.OrganizationDTO;
+import com.example.volunteermanagement.dto.PendingApplicationDTO;
+import com.example.volunteermanagement.service.OrganizationService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
-import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
 import java.security.Principal;
 import java.util.List;
-import java.util.stream.Collectors;
 
 @RestController
-@RequestMapping("/api/organization")
+@RequestMapping("/api/organizations")
 @RequiredArgsConstructor
 public class OrganizationController {
 
-    private final UserRepository userRepository;
+    private final OrganizationService organizationService;
 
-    // 1. Tagok listázása (Csak a saját szervezetem tagjait látom!)
-    @GetMapping("/members")
-    public ResponseEntity<List<UserDTO>> getMyMembers(Principal principal) {
-        // Megkeressük, ki kérdezi (pl. Főszervező Ferenc)
-        User currentUser = userRepository.findByEmail(principal.getName())
-                .orElseThrow(() -> new RuntimeException("Felhasználó nem található"));
-
-        if (currentUser.getOrganization() == null) {
-            throw new RuntimeException("Nincs szervezeted!");
-        }
-
-        // Lekérjük a szervezet összes tagját
-        List<User> members = currentUser.getOrganization().getMembers();
-
-        // Átalakítjuk őket biztonságos DTO-vá
-        List<UserDTO> memberDtos = members.stream()
-                .map(u -> new UserDTO(u.getId(), u.getName(), u.getEmail(), u.getRole()))
-                .collect(Collectors.toList());
-
-        return ResponseEntity.ok(memberDtos);
+    // GET /api/organizations -> Visszaadja a listát
+    @GetMapping
+    public ResponseEntity<List<OrganizationDTO>> getAllOrganizations() {
+        return ResponseEntity.ok(organizationService.getAllOrganizations());
     }
 
-    // 2. Kinevezés Koordinátorrá (Role módosítás)
-    @PutMapping("/members/{id}/promote")
-    public ResponseEntity<String> promoteToCoordinator(@PathVariable Long id, Principal principal) {
+    // POST /api/organizations/1/join -> Jelentkezés az 1-es ID-jú szervezetbe
+    @PostMapping("/{id}/join")
+    public ResponseEntity<String> joinOrganization(
+            @PathVariable Long id,
+            Authentication authentication
+    ) {
+        // A bejelentkezett felhasználó email címét a Spring Security-ből szedjük ki
+        organizationService.joinOrganization(id, authentication.getName());
+        return ResponseEntity.ok("Sikeresen jelentkeztél a szervezetbe! Várj a jóváhagyásra.");
+    }
 
-        User admin = userRepository.findByEmail(principal.getName())
-                .orElseThrow();
+    @GetMapping("/applications/pending")
+    public ResponseEntity<List<PendingApplicationDTO>> getPendingApplications(Principal principal) {
+        return ResponseEntity.ok(organizationService.getPendingApplications(principal.getName()));
+    }
 
-        // Biztonsági ellenőrzés: Csak ORGANIZER vagy ADMIN nevezhet ki
-        if (admin.getRole() != Role.ORGANIZER && admin.getRole() != Role.SYS_ADMIN) {
-            return ResponseEntity.status(403).body("Nincs jogod ehhez! Csak Szervező nevezhet ki koordinátort.");
-        }
-
-        User targetUser = userRepository.findById(id)
-                .orElseThrow(() -> new RuntimeException("Felhasználó nem található"));
-
-        // Biztonsági ellenőrzés: A célpont ugyanabban a szervezetben van?
-        if (!targetUser.getOrganization().getId().equals(admin.getOrganization().getId())) {
-            return ResponseEntity.status(403).body("Ez a felhasználó nem a te szervezetedhez tartozik!");
-        }
-
-        // Kinevezés
-        targetUser.setRole(Role.COORDINATOR);
-        userRepository.save(targetUser);
-
-        return ResponseEntity.ok(targetUser.getName() + " mostantól Koordinátor!");
+    @PutMapping("/applications/{id}")
+    public ResponseEntity<Void> handleApplication(@PathVariable Long id, @RequestParam String status) {
+        organizationService.handleApplication(id, status);
+        return ResponseEntity.ok().build();
     }
 }

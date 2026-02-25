@@ -3,6 +3,8 @@ package com.example.volunteermanagement.service;
 import com.example.volunteermanagement.dto.EventDTO;
 import com.example.volunteermanagement.dto.ShiftDTO;
 import com.example.volunteermanagement.model.Event;
+import com.example.volunteermanagement.model.Organization;
+import com.example.volunteermanagement.model.OrganizationRole;
 import com.example.volunteermanagement.model.Shift;
 import com.example.volunteermanagement.model.User;
 import com.example.volunteermanagement.repository.EventRepository;
@@ -28,13 +30,17 @@ public class EventService {
 
     @Transactional
     public Event createEventWithShifts(EventDTO dto, String creatorEmail) {
-
         User creator = userRepository.findByEmail(creatorEmail)
                 .orElseThrow(() -> new RuntimeException("Felhasználó nem található"));
 
-        if (creator.getOrganization() == null) {
-            throw new RuntimeException("Hiba: Ez a felhasználó nem tartozik egyetlen szervezethez sem!");
-        }
+        // JAVÍTÁS: A SYS_ADMIN bárhol hozhat létre eseményt?
+        // Egyelőre maradjunk annál, hogy kell egy szervezet, ahol vezető.
+        Organization org = creator.getMemberships().stream()
+                .filter(m -> m.getStatus() == com.example.volunteermanagement.model.MembershipStatus.APPROVED &&
+                        (m.getRole() == OrganizationRole.OWNER || m.getRole() == OrganizationRole.ORGANIZER))
+                .map(m -> m.getOrganization())
+                .findFirst()
+                .orElseThrow(() -> new RuntimeException("Hiba: Nincs jóváhagyott vezetői jogosultságod!"));
 
         Event event = Event.builder()
                 .title(dto.title())
@@ -43,18 +49,17 @@ public class EventService {
                 .startTime(dto.startTime())
                 .endTime(dto.endTime())
                 .shifts(new ArrayList<>())
-                .organization(creator.getOrganization())
+                .organization(org)
                 .build();
 
-        // Mivel átalakult a rendszer, az esemény létrehozásakor
-        // egyelőre nem hozunk létre műszakokat (azokat a koordinátor osztja be később),
-        // vagy ha mégis, akkor csak időpontokat tárolunk, létszámkorlát nélkül.
         if (dto.shifts() != null && !dto.shifts().isEmpty()) {
             for (ShiftDTO shiftDto : dto.shifts()) {
                 Shift shift = Shift.builder()
+                        .name(shiftDto.area())
                         .startTime(shiftDto.startTime())
                         .endTime(shiftDto.endTime())
-                        .event(event) // Beállítjuk a kapcsolatot
+                        .maxVolunteers(shiftDto.maxVolunteers()) // Ne felejtsd el a létszámot!
+                        .event(event)
                         .build();
                 event.addShift(shift);
             }
@@ -63,50 +68,113 @@ public class EventService {
         return eventRepository.save(event);
     }
 
-    public Page<Event> getAllEvents(Pageable pageable, String requesterEmail) {
+    public org.springframework.data.domain.Page<com.example.volunteermanagement.dto.EventDTO> getAllEvents(
+            org.springframework.data.domain.Pageable pageable,
+            String requesterEmail) {
+
         User user = userRepository.findByEmail(requesterEmail)
                 .orElseThrow(() -> new RuntimeException("Felhasználó nem található"));
 
+        // 1. Definiáljuk az ENTITÁS oldalt (ezt kérjük le az adatbázisból)
+        org.springframework.data.domain.Page<com.example.volunteermanagement.model.Event> eventEntities;
+
         if (user.getRole() == com.example.volunteermanagement.model.Role.SYS_ADMIN) {
-            return eventRepository.findAll(pageable);
-        }
+            eventEntities = eventRepository.findAll(pageable);
+        } else {
+            List<Long> approvedOrgIds = user.getMemberships().stream()
+                    .filter(m -> m.getStatus() == com.example.volunteermanagement.model.MembershipStatus.APPROVED)
+                    .map(m -> m.getOrganization().getId())
+                    .collect(Collectors.toList());
 
-        if (user.getOrganization() == null) {
-            // Ha önkéntes és nincs szervezete, akkor is látnia kell az eseményeket,
-            // hogy tudjon jelentkezni! (Kivéve, ha privát események).
-            // Egyelőre feltételezzük, hogy az önkéntesek mindent láthatnak, vagy módosítsd igény szerint.
-            // Ha azt akarod, hogy az önkéntesek MINDEN publikus eseményt lássanak:
-            if (user.getRole() == com.example.volunteermanagement.model.Role.VOLUNTEER) {
-                return eventRepository.findAll(pageable);
+            if (approvedOrgIds.isEmpty()) {
+                return org.springframework.data.domain.Page.empty(pageable);
             }
-            return Page.empty();
+            eventEntities = eventRepository.findByOrganizationIdIn(approvedOrgIds, pageable);
         }
 
-        return eventRepository.findAllByOrganizationId(user.getOrganization().getId(), pageable);
+        // 2. Itt történik a MAPPELÉS: Event -> EventDTO
+        // A .map() függvény gondoskodik róla, hogy a Page<Event>-ből Page<EventDTO> legyen
+        return eventEntities.map(event -> new com.example.volunteermanagement.dto.EventDTO(
+                event.getId(),
+                event.getTitle(),
+                event.getDescription(),
+                event.getLocation(),
+                event.getStartTime(),
+                event.getEndTime(),
+                event.getShifts().stream()
+                        .map(s -> new com.example.volunteermanagement.dto.ShiftDTO(
+                                s.getId(), s.getName(), s.getStartTime(), s.getEndTime(), s.getMaxVolunteers()))
+                        .collect(Collectors.toList()),
+                new com.example.volunteermanagement.dto.OrganizationDTO(
+                        event.getOrganization().getId(),
+                        event.getOrganization().getName(),
+                        event.getOrganization().getAddress(),
+                        event.getOrganization().getDescription(), // ÚJ
+                        event.getOrganization().getEmail(),       // ÚJ
+                        event.getOrganization().getPhone()
+                )
+        ));
     }
 
     public Event getEventById(Long id) {
         return eventRepository.findById(id)
-                .orElseThrow(() -> new RuntimeException("Az esemény nem található ezzel az ID-val: " + id));
+                .orElseThrow(() -> new RuntimeException("Az esemény nem található: " + id));
     }
 
-    // --- AZ applyToShift METÓDUS TÖRÖLVE LETT! ---
-    // (Mert most már az ApplicationController kezeli a jelentkezést WorkArea-ra)
-
-    // --- SAJÁT MŰSZAKOK LEKÉRÉSE (JAVÍTOTT) ---
     public List<ShiftDTO> getUserShifts(String email) {
         User user = userRepository.findByEmail(email)
                 .orElseThrow(() -> new RuntimeException("User nem található"));
 
-        // JAVÍTÁS: findByAssignedUser -> findByVolunteersContaining
+        // Megkeressük azokat a műszakokat, amikre az adott felhasználó már jelentkezett (és el lett fogadva)
         List<Shift> databaseShifts = shiftRepository.findByVolunteersContaining(user);
 
         return databaseShifts.stream()
                 .map(shift -> new ShiftDTO(
                         shift.getId(),
+                        shift.getName(),
                         shift.getStartTime(),
-                        shift.getEndTime()
+                        shift.getEndTime(),
+                        shift.getMaxVolunteers()
                 ))
                 .collect(Collectors.toList());
+    }
+
+    @Transactional
+    public Event updateEvent(Long id, EventDTO dto) {
+        Event event = eventRepository.findById(id)
+                .orElseThrow(() -> new RuntimeException("Esemény nem található"));
+
+        event.setTitle(dto.title());
+        event.setDescription(dto.description());
+        event.setLocation(dto.location());
+        event.setStartTime(dto.startTime());
+        event.setEndTime(dto.endTime());
+
+        // Műszakok frissítése: egyszerűség kedvéért töröljük a régieket és újakat adunk hozzá
+        // (Vigyázat: élesben ez törli a meglévő jelentkezéseket is a műszakokról!)
+        event.getShifts().clear();
+
+        if (dto.shifts() != null) {
+            for (var shiftDto : dto.shifts()) {
+                Shift newShift = Shift.builder()
+                        .name(shiftDto.area())
+                        .startTime(shiftDto.startTime())
+                        .endTime(shiftDto.endTime())
+                        .maxVolunteers(shiftDto.maxVolunteers())
+                        .event(event)
+                        .build();
+                event.addShift(newShift);
+            }
+        }
+
+        return eventRepository.save(event);
+    }
+
+    @Transactional
+    public void deleteEvent(Long id) {
+        if (!eventRepository.existsById(id)) {
+            throw new RuntimeException("Esemény nem található.");
+        }
+        eventRepository.deleteById(id);
     }
 }

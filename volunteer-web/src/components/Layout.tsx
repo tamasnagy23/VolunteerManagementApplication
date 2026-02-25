@@ -20,6 +20,7 @@ export default function Layout() {
     // Itt definiáljuk a menüpontokat
     const navItems = [
         { label: 'Események', path: '/dashboard' },
+        { label: 'Szervezetek', path: '/organizations' },
         { label: 'Saját Műszakjaim', path: '/my-shifts' },
         // Később ide jön a 'Profil' is
     ];

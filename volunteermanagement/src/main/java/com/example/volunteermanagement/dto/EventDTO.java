@@ -9,6 +9,8 @@ import java.time.LocalDateTime;
 import java.util.List;
 
 public record EventDTO(
+        long id,
+
         @NotBlank(message = "Az esemény címe nem lehet üres")
         @Size(min = 3, max = 100, message = "A cím 3 és 100 karakter között legyen")
         String title,
@@ -31,5 +33,7 @@ public record EventDTO(
 
         // Levettük a @NotEmpty-t, így lehet üres a lista (opcionális)
         @Valid
-        List<ShiftDTO> shifts
+        List<ShiftDTO> shifts,
+
+        OrganizationDTO organization
 ) {}

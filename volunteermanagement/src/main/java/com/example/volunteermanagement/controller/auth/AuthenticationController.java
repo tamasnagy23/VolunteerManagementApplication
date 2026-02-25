@@ -1,6 +1,8 @@
 package com.example.volunteermanagement.controller.auth;
 
-import com.example.volunteermanagement.service.AuthService; // <--- ITT A LÉNYEG!
+import com.example.volunteermanagement.dto.RegisterRequest; // <-- JAVÍTÁS: A DTO mappából importáljuk!
+import com.example.volunteermanagement.service.AuthService;
+import jakarta.validation.Valid; // <-- ÚJ IMPORT a validációhoz
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -9,16 +11,16 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
-@RequestMapping("/api/auth") // Figyelj, hogy a React ide küldi-e a kérést!
+@RequestMapping("/api/auth")
 @RequiredArgsConstructor
 public class AuthenticationController {
 
-    // Itt a javítás: AuthenticationService -> AuthService
     private final AuthService service;
 
     @PostMapping("/register")
     public ResponseEntity<AuthenticationResponse> register(
-            @RequestBody RegisterRequest request
+            // A @Valid mondja meg a Springnek, hogy ellenőrizze a DTO-ban lévő szabályokat (GDPR, dátum, stb.)
+            @Valid @RequestBody RegisterRequest request
     ) {
         return ResponseEntity.ok(service.register(request));
     }
@@ -28,5 +30,12 @@ public class AuthenticationController {
             @RequestBody AuthenticationRequest request
     ) {
         return ResponseEntity.ok(service.authenticate(request));
+    }
+
+    @PostMapping("/register-org")
+    public ResponseEntity<AuthenticationResponse> registerOrganization(
+            @RequestBody RegisterOrgRequest request
+    ) {
+        return ResponseEntity.ok(service.registerOrganization(request));
     }
 }
