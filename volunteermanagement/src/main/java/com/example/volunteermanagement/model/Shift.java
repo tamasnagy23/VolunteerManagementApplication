@@ -36,8 +36,7 @@ public class Shift {
     private Set<User> volunteers = new HashSet<>();
     // -------------------------------------------------------------------------------
 
-    @ManyToOne
-    @JoinColumn(name = "event_id")
-    @JsonIgnore
-    private Event event;
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "work_area_id", nullable = false)
+    private WorkArea workArea;
 }

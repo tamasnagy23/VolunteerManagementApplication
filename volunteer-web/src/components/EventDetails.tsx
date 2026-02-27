@@ -1,270 +1,427 @@
 import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
-    Container, Typography, Box, Button, CircularProgress,
-    Card, CardContent, CardActions, Chip, Alert, Grid, Divider
+    Container, Typography, Box, Paper, Button, CircularProgress,
+    Alert, Divider, Grid, Dialog, DialogTitle, DialogContent,
+    DialogActions, FormControlLabel, Checkbox, TextField,
+    FormControl, InputLabel, Select, MenuItem, FormGroup, Tooltip
 } from '@mui/material';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
-import WorkIcon from '@mui/icons-material/Work';
-import CheckCircleIcon from '@mui/icons-material/CheckCircle';
-import PeopleIcon from '@mui/icons-material/People';
-import ScheduleIcon from '@mui/icons-material/Schedule';
+import HowToRegIcon from '@mui/icons-material/HowToReg';
+import DeleteIcon from '@mui/icons-material/Delete';
+import RestoreIcon from '@mui/icons-material/Restore';
 import api from '../api/axios';
 import axios from 'axios';
 
 // --- INTERFÉSZEK ---
-interface Shift {
+interface EventQuestion {
     id: number;
-    area?: string;
-    name?: string;
-    startTime: string;
-    endTime: string;
-    maxVolunteers: number;
+    questionText: string;
+    questionType: 'TEXT' | 'DROPDOWN' | 'CHECKBOX';
+    options: string;
+    isRequired: boolean;
 }
 
-interface Event {
+interface WorkArea {
+    id: number;
+    name: string;
+    description: string;
+    capacity: number;
+}
+
+interface EventData {
     id: number;
     title: string;
     description: string;
     location: string;
     startTime: string;
     endTime: string;
-    shifts: Shift[];
+    workAreas: WorkArea[];
+    questions: EventQuestion[];
+    organization: { name: string };
 }
 
-interface Application {
+interface UserApplication {
     id: number;
-    event: { id: number };
-    shift?: { id: number; name: string };
-    status: string;
+    eventId?: number;
+    orgName: string;
+    // Bővítettük a típust a WITHDRAWN állapottal
+    status: 'PENDING' | 'APPROVED' | 'REJECTED' | 'WITHDRAWN';
+    workAreaName: string;
 }
 
 export default function EventDetails() {
     const { id } = useParams<{ id: string }>();
     const navigate = useNavigate();
 
-    const [event, setEvent] = useState<Event | null>(null);
-    const [existingApplication, setExistingApplication] = useState<Application | null>(null);
-
+    const [event, setEvent] = useState<EventData | null>(null);
     const [loading, setLoading] = useState<boolean>(true);
-    const [applyingId, setApplyingId] = useState<number | null>(null);
-    const [error, setError] = useState<string | null>(null); // EZ HIÁNYZOTT!
+    const [error, setError] = useState<string | null>(null);
+    const [myApplications, setMyApplications] = useState<UserApplication[]>([]);
+
+    const [openModal, setOpenModal] = useState(false);
+    const [submitting, setSubmitting] = useState(false);
+    const [selectedWorkAreas, setSelectedWorkAreas] = useState<number[]>([]);
+    const [answers, setAnswers] = useState<Record<number, string | string[]>>({});
 
     useEffect(() => {
-        const fetchData = async () => {
-            try {
-                if (!id) return;
-                setLoading(true);
-                setError(null);
-
-                // 1. Esemény adatai (ebben már benne vannak a műszakok is!)
-                const eventRes = await api.get(`/events/${id}`);
-                setEvent(eventRes.data);
-
-                // 2. Megnézzük, jelentkeztem-e már
-                try {
-                    const myAppsRes = await api.get('/applications/my');
-                    const myApp = myAppsRes.data.find((app: Application) => app.event.id === Number(id));
-                    setExistingApplication(myApp || null);
-                } catch (appErr) {
-                    console.warn("Nem sikerült betölteni a jelentkezéseket:", appErr);
-                }
-
-            } catch (err) {
-                console.error("Hiba az adatok betöltésekor:", err);
-                setError("Nem sikerült betölteni az esemény adatait.");
-            } finally {
-                setLoading(false);
-            }
-        };
-
-        fetchData();
+        if (id) {
+            fetchEventData();
+            checkIfApplied();
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [id]);
 
-    const handleApply = async (shiftId: number) => {
-        if (!id) return;
-
-        const confirm = window.confirm("Biztosan jelentkezni szeretnél erre a műszakra?");
-        if (!confirm) return;
-
+    const fetchEventData = async () => {
         try {
-            setApplyingId(shiftId);
-            setError(null);
+            const res = await api.get(`/events/${id}`);
+            setEvent(res.data);
 
-            await api.post('/applications', null, {
-                params: {
-                    eventId: id,
-                    shiftId: shiftId
-                }
-            });
-
-            window.location.reload();
-
-        } catch (err) {
-            console.error(err);
-            let msg = "Hiba történt a jelentkezéskor.";
-            if (axios.isAxiosError(err) && err.response?.data) {
-                msg = typeof err.response.data === 'string'
-                    ? err.response.data
-                    : JSON.stringify(err.response.data);
+            const initialAnswers: Record<number, string | string[]> = {};
+            if (res.data.questions) {
+                res.data.questions.forEach((q: EventQuestion) => {
+                    initialAnswers[q.id] = q.questionType === 'CHECKBOX' ? [] : '';
+                });
             }
-            setError(msg);
+            setAnswers(initialAnswers);
+        } catch {
+            setError("Hiba történt az esemény betöltésekor.");
         } finally {
-            setApplyingId(null);
+            setLoading(false);
         }
     };
 
-    const formatDate = (dateString: string) => {
-        if (!dateString) return '';
-        return new Date(dateString).toLocaleDateString('hu-HU', {
-            month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
+    const checkIfApplied = async () => {
+        try {
+            const res = await api.get('/applications/my');
+            const appsForThisEvent = res.data.filter((app: UserApplication) => app.eventId === Number(id));
+            setMyApplications(appsForThisEvent);
+        } catch (err) {
+            console.error("Hiba a jelentkezések ellenőrzésekor:", err);
+        }
+    };
+
+    const handleWithdraw = async (applicationId: number) => {
+        if (window.confirm("Biztosan vissza szeretnéd vonni a jelentkezésedet erről a területről?")) {
+            try {
+                // A DELETE mostantól nem töröl, hanem WITHDRAWN-ra állít a backenden
+                await api.delete(`/applications/${applicationId}`);
+                await checkIfApplied();
+            } catch {
+                alert("Nem sikerült visszavonni a jelentkezést.");
+            }
+        }
+    };
+
+    const handleReApply = async (applicationId: number) => {
+        try {
+            // Visszaállítjuk PENDING státuszra
+            await api.put(`/applications/${applicationId}/status`, null, { params: { status: 'PENDING' } });
+            await checkIfApplied();
+            alert("Sikeresen visszajelentkeztél erre a területre!");
+        } catch {
+            alert("Nem sikerült a visszajelentkezés.");
+        }
+    };
+
+    const handleWorkAreaToggle = (areaId: number) => {
+        setSelectedWorkAreas(prev =>
+            prev.includes(areaId) ? prev.filter(id => id !== areaId) : [...prev, areaId]
+        );
+    };
+
+    const handleAnswerChange = (questionId: number, value: string | string[]) => {
+        setAnswers(prev => ({ ...prev, [questionId]: value }));
+    };
+
+    const handleCheckboxAnswerToggle = (questionId: number, option: string) => {
+        setAnswers(prev => {
+            const currentSelected = (prev[questionId] as string[]) || [];
+            const updated = currentSelected.includes(option)
+                ? currentSelected.filter(item => item !== option)
+                : [...currentSelected, option];
+            return { ...prev, [questionId]: updated };
         });
     };
 
-    if (loading) {
-        return <Box display="flex" justifyContent="center" mt={10}><CircularProgress /></Box>;
-    }
+    const handleSubmitApplication = async () => {
+        if (selectedWorkAreas.length === 0) {
+            alert("Kérlek válassz ki legalább egy munkaterületet!");
+            return;
+        }
 
-    if (!event) {
-        return <Container sx={{ mt: 4 }}><Alert severity="error">Esemény nem található.</Alert></Container>;
-    }
+        for (const q of event?.questions || []) {
+            if (q.isRequired) {
+                const answer = answers[q.id];
+                if (!answer || (Array.isArray(answer) && answer.length === 0)) {
+                    alert(`A(z) "${q.questionText}" kérdés megválaszolása kötelező!`);
+                    return;
+                }
+            }
+        }
 
-    const shifts = event.shifts || [];
+        setSubmitting(true);
+        try {
+            const formattedAnswers: Record<number, string> = {};
+            Object.keys(answers).forEach(key => {
+                const numKey = Number(key);
+                formattedAnswers[numKey] = Array.isArray(answers[numKey])
+                    ? (answers[numKey] as string[]).join(', ')
+                    : (answers[numKey] as string);
+            });
+
+            await api.post('/applications', {
+                eventId: event?.id,
+                preferredWorkAreaIds: selectedWorkAreas,
+                answers: formattedAnswers
+            });
+
+            setOpenModal(false);
+            await checkIfApplied();
+            alert("Sikeres jelentkezés!");
+        } catch (err: unknown) {
+            if (axios.isAxiosError(err)) {
+                alert(err.response?.data || "Hiba történt a jelentkezés során.");
+            }
+        } finally {
+            setSubmitting(false);
+        }
+    };
+
+    if (loading) return <Box display="flex" justifyContent="center" mt={10}><CircularProgress /></Box>;
+    if (!event) return <Container><Alert severity="error">Esemény nem található.</Alert></Container>;
 
     return (
-        <Container maxWidth="lg" sx={{ mt: 4, mb: 4 }}>
+        <Container maxWidth="lg" sx={{ mt: 4, mb: 10 }}>
             <Button startIcon={<ArrowBackIcon />} onClick={() => navigate('/dashboard')} sx={{ mb: 3 }}>
-                Vissza a Dashboardra
+                Vissza a listához
             </Button>
 
             {error && <Alert severity="error" sx={{ mb: 3 }}>{error}</Alert>}
 
-            {/* ESEMÉNY FEJLÉC */}
-            <Card elevation={2} sx={{ mb: 4, borderRadius: 3 }}>
-                <CardContent sx={{ p: 4 }}>
-                    <Typography variant="h3" fontWeight="bold" gutterBottom color="primary">
-                        {event.title}
+            {myApplications.length > 0 && (
+                <Alert
+                    severity="info"
+                    sx={{ mb: 4, borderRadius: 2, border: '1px solid', borderColor: 'divider', bgcolor: '#f8fbff' }}
+                >
+                    <Typography variant="subtitle1" fontWeight="bold" mb={2} color="primary">
+                        Jelentkezéseid állapota:
                     </Typography>
 
-                    <Box display="flex" gap={4} mb={3} flexWrap="wrap">
-                        <Box display="flex" alignItems="center" gap={1}>
-                            <WorkIcon color="action" />
-                            <Typography variant="subtitle1" color="text.secondary">
-                                {event.location}
-                            </Typography>
+                    {myApplications.map((app) => (
+                        <Box key={app.id} sx={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'space-between',
+                            mb: 1, p: 1,
+                            bgcolor: 'white',
+                            borderRadius: 1,
+                            boxShadow: '0 1px 3px rgba(0,0,0,0.1)'
+                        }}>
+                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                                <Typography sx={{ minWidth: { xs: '100px', md: '180px' }, fontWeight: 'bold' }}>
+                                    {app.workAreaName}
+                                </Typography>
+                                <Typography
+                                    variant="body2"
+                                    fontWeight="bold"
+                                    color={
+                                        app.status === 'APPROVED' ? 'success.main' :
+                                            app.status === 'REJECTED' ? 'error.main' :
+                                                app.status === 'WITHDRAWN' ? 'text.disabled' : 'text.secondary'
+                                    }
+                                >
+                                    {app.status === 'PENDING' ? '⏳ Elbírálás alatt' :
+                                        app.status === 'APPROVED' ? '✅ Elfogadva' :
+                                            app.status === 'REJECTED' ? '❌ Elutasítva' : '🏳️ Visszavonva'}
+                                </Typography>
+                            </Box>
+
+                            <Box>
+                                {/* Csak akkor vonhatja vissza, ha még elbírálás alatt van vagy már elfogadták */}
+                                {(app.status === 'PENDING' || app.status === 'APPROVED') && (
+                                    <Tooltip title="Jelentkezés visszavonása">
+                                        <Button
+                                            size="small"
+                                            color="error"
+                                            variant="outlined"
+                                            startIcon={<DeleteIcon />}
+                                            onClick={() => handleWithdraw(app.id)}
+                                        >
+                                            Visszavonás
+                                        </Button>
+                                    </Tooltip>
+                                )}
+
+                                {/* Ha visszavonta, lehetőséget adunk az újrajelentkezésre */}
+                                {app.status === 'WITHDRAWN' && (
+                                    <Tooltip title="Újrajelentkezés erre a területre">
+                                        <Button
+                                            size="small"
+                                            color="primary"
+                                            variant="contained"
+                                            startIcon={<RestoreIcon />}
+                                            onClick={() => handleReApply(app.id)}
+                                        >
+                                            Visszajelentkezés
+                                        </Button>
+                                    </Tooltip>
+                                )}
+                            </Box>
                         </Box>
-                        <Box display="flex" alignItems="center" gap={1}>
-                            <ScheduleIcon color="action" />
-                            <Typography variant="subtitle1" color="text.secondary">
-                                {formatDate(event.startTime)} - {formatDate(event.endTime)}
-                            </Typography>
-                        </Box>
-                    </Box>
-
-                    <Divider sx={{ mb: 3 }} />
-
-                    <Typography variant="body1" sx={{ whiteSpace: 'pre-line', fontSize: '1.1rem', lineHeight: 1.7 }}>
-                        {event.description}
-                    </Typography>
-                </CardContent>
-            </Card>
-
-            {/* JELENTKEZÉS STÁTUSZA */}
-            {existingApplication ? (
-                <Alert severity="success" icon={<CheckCircleIcon fontSize="inherit" />} sx={{ mb: 4, borderRadius: 2 }}>
-                    <Typography variant="h6" fontWeight="bold">
-                        Már jelentkeztél erre az eseményre!
-                    </Typography>
-                    <Typography variant="body1" sx={{ mt: 1 }}>
-                        Választott műszak: <strong>{existingApplication.shift?.name || 'Ismeretlen'}</strong> <br />
-                        Státusz: <strong>
-                        {existingApplication.status === 'PENDING' ? 'Elbírálás alatt ⏳' :
-                            existingApplication.status === 'APPROVED' ? 'Elfogadva ✅' : 'Elutasítva ❌'}
-                    </strong>
-                    </Typography>
+                    ))}
                 </Alert>
-            ) : (
-                <Typography variant="h5" fontWeight="bold" sx={{ mb: 3 }}>
-                    Elérhető Műszakok és Területek:
-                </Typography>
             )}
 
-            {/* MŰSZAKOK LISTÁZÁSA GRIDBEN */}
-            <Grid container spacing={3}>
-                {shifts.map((shift) => (
-                    // JAVÍTÁS: MUI v6 szintaxis
-                    <Grid size={{ xs: 12, md: 6 }} key={shift.id}>
-                        <Card
-                            variant="outlined"
-                            sx={{
-                                height: '100%',
-                                display: 'flex',
-                                flexDirection: 'column',
-                                borderRadius: 2,
-                                transition: '0.2s',
-                                '&:hover': { borderColor: 'primary.main', boxShadow: 2 }
-                            }}
-                        >
-                            <CardContent sx={{ flexGrow: 1 }}>
-                                <Box display="flex" alignItems="center" mb={2}>
-                                    <WorkIcon color="primary" sx={{ mr: 1.5, fontSize: 28 }} />
-                                    <Typography variant="h5" fontWeight="bold">
-                                        {shift.name || shift.area || 'Névtelen terület'}
-                                    </Typography>
-                                </Box>
-
-                                <Box display="flex" alignItems="center" mb={1} color="text.secondary">
-                                    <ScheduleIcon sx={{ mr: 1, fontSize: 20 }} />
-                                    <Typography variant="body1">
-                                        {formatDate(shift.startTime)} - {formatDate(shift.endTime)}
-                                    </Typography>
-                                </Box>
-
-                                <Box display="flex" alignItems="center" color="text.secondary">
-                                    <PeopleIcon sx={{ mr: 1, fontSize: 20 }} />
-                                    <Typography variant="body1">
-                                        Szükséges létszám: <strong>{shift.maxVolunteers || 'Nincs megadva'} fő</strong>
-                                    </Typography>
-                                </Box>
-                            </CardContent>
-
-                            <Divider />
-
-                            <CardActions sx={{ p: 2, bgcolor: '#fafafa' }}>
-                                {existingApplication ? (
-                                    existingApplication.shift?.id === shift.id ? (
-                                        <Chip label="Ide jelentkeztél" color="success" icon={<CheckCircleIcon />} sx={{ fontWeight: 'bold' }} />
-                                    ) : (
-                                        <Button disabled fullWidth variant="text" sx={{ color: 'text.disabled' }}>
-                                            Már jelentkeztél máshova
-                                        </Button>
-                                    )
-                                ) : (
-                                    <Button
-                                        fullWidth
-                                        variant="contained"
-                                        size="large"
-                                        onClick={() => handleApply(shift.id)}
-                                        disabled={applyingId !== null}
-                                        sx={{ borderRadius: 2, fontWeight: 'bold' }}
-                                    >
-                                        {applyingId === shift.id ? <CircularProgress size={24} color="inherit" /> : "Jelentkezem ide"}
-                                    </Button>
-                                )}
-                            </CardActions>
-                        </Card>
+            <Paper elevation={3} sx={{ p: { xs: 3, md: 5 }, borderRadius: 3 }}>
+                <Grid container spacing={4}>
+                    <Grid size={{xs:12, md:8}}  >
+                        <Typography variant="h3" fontWeight="bold" gutterBottom color="primary">
+                            {event.title}
+                        </Typography>
+                        <Typography variant="h6" color="text.secondary" gutterBottom>
+                            Szervező: {event.organization.name}
+                        </Typography>
+                        <Box mt={4}>
+                            <Typography variant="body1" sx={{ whiteSpace: 'pre-wrap', fontSize: '1.1rem' }}>
+                                {event.description}
+                            </Typography>
+                        </Box>
                     </Grid>
-                ))}
 
-                {shifts.length === 0 && (
-                    // JAVÍTÁS: MUI v6 szintaxis
-                    <Grid size={{ xs: 12 }}>
-                        <Alert severity="info" sx={{ borderRadius: 2 }}>
-                            Ehhez az eseményhez jelenleg nincsenek feltöltve műszakok.
-                        </Alert>
+                    <Grid size={{xs:12, md:4}}>
+                        <Paper variant="outlined" sx={{ p: 3, bgcolor: '#f5f5f5', borderRadius: 2 }}>
+                            <Typography variant="subtitle1" fontWeight="bold">Helyszín</Typography>
+                            <Typography variant="body2" mb={2}>{event.location}</Typography>
+
+                            <Typography variant="subtitle1" fontWeight="bold">Kezdés</Typography>
+                            <Typography variant="body2" mb={2}>{new Date(event.startTime).toLocaleString('hu-HU')}</Typography>
+
+                            <Typography variant="subtitle1" fontWeight="bold">Befejezés</Typography>
+                            <Typography variant="body2" mb={3}>{new Date(event.endTime).toLocaleString('hu-HU')}</Typography>
+
+                            <Button
+                                variant="contained"
+                                size="large"
+                                fullWidth
+                                startIcon={<HowToRegIcon />}
+                                // A gomb akkor tiltott, ha van bármilyen aktív (nem visszavont) jelentkezése
+                                disabled={myApplications.some(app => app.status !== 'WITHDRAWN')}
+                                onClick={() => setOpenModal(true)}
+                                sx={{ py: 1.5, fontWeight: 'bold', borderRadius: 2 }}
+                            >
+                                {myApplications.some(app => app.status !== 'WITHDRAWN') ? "Jelentkezés leadva" : "Jelentkezem az Eseményre"}
+                            </Button>
+                        </Paper>
                     </Grid>
-                )}
-            </Grid>
+                </Grid>
+
+                <Divider sx={{ my: 5 }} />
+
+                <Typography variant="h5" fontWeight="bold" mb={3}>Elérhető Munkaterületek</Typography>
+                <Grid container spacing={3}>
+                    {event.workAreas.map((area) => (
+                        <Grid size={{xs:12, sm:6, md:4}} key={area.id}>
+                            <Paper variant="outlined" sx={{ p: 3, height: '100%', borderRadius: 2, borderLeft: '4px solid #1976d2' }}>
+                                <Typography variant="h6" fontWeight="bold">{area.name}</Typography>
+                                <Typography variant="body2" color="text.secondary" sx={{ mt: 1, mb: 2, minHeight: 40 }}>
+                                    {area.description || "Nincs megadva leírás."}
+                                </Typography>
+                                <Typography variant="caption" fontWeight="bold" color="primary">
+                                    Kapacitás: {area.capacity} fő
+                                </Typography>
+                            </Paper>
+                        </Grid>
+                    ))}
+                </Grid>
+            </Paper>
+
+            <Dialog open={openModal} onClose={() => setOpenModal(false)} maxWidth="sm" fullWidth>
+                <DialogTitle sx={{ fontWeight: 'bold', bgcolor: '#1976d2', color: 'white' }}>
+                    Jelentkezési Lap leadása
+                </DialogTitle>
+                <DialogContent sx={{ mt: 2 }}>
+                    <Typography variant="body2" color="text.secondary" mb={3}>
+                        Kérjük, jelöld meg, mely területeken dolgoznál a legszívesebben!
+                    </Typography>
+
+                    <Typography variant="subtitle1" fontWeight="bold" color="primary">Mely területek érdekelnek?</Typography>
+                    <FormGroup sx={{ mb: 3 }}>
+                        {event.workAreas.map(area => (
+                            <FormControlLabel
+                                key={area.id}
+                                control={<Checkbox checked={selectedWorkAreas.includes(area.id)} onChange={() => handleWorkAreaToggle(area.id)} />}
+                                label={`${area.name} (Max ${area.capacity} fő)`}
+                            />
+                        ))}
+                    </FormGroup>
+
+                    <Divider sx={{ my: 3 }} />
+
+                    {event.questions && event.questions.length > 0 && (
+                        <>
+                            <Typography variant="subtitle1" fontWeight="bold" color="primary" mb={2}>További információk</Typography>
+                            {event.questions.map(q => (
+                                <Box key={q.id} mb={3}>
+                                    {q.questionType === 'TEXT' && (
+                                        <TextField
+                                            fullWidth
+                                            label={q.questionText}
+                                            required={q.isRequired}
+                                            value={answers[q.id] || ''}
+                                            onChange={(e) => handleAnswerChange(q.id, e.target.value)}
+                                        />
+                                    )}
+
+                                    {q.questionType === 'DROPDOWN' && (
+                                        <FormControl fullWidth required={q.isRequired}>
+                                            <InputLabel>{q.questionText}</InputLabel>
+                                            <Select
+                                                label={q.questionText}
+                                                value={answers[q.id] || ''}
+                                                onChange={(e) => handleAnswerChange(q.id, e.target.value)}
+                                            >
+                                                {q.options.split(',').map((opt, i) => (
+                                                    <MenuItem key={i} value={opt.trim()}>{opt.trim()}</MenuItem>
+                                                ))}
+                                            </Select>
+                                        </FormControl>
+                                    )}
+
+                                    {q.questionType === 'CHECKBOX' && (
+                                        <FormControl component="fieldset" required={q.isRequired}>
+                                            <Typography variant="body1">{q.questionText} {q.isRequired && '*'}</Typography>
+                                            <FormGroup>
+                                                {q.options.split(',').map((opt, i) => {
+                                                    const optionTrimmed = opt.trim();
+                                                    return (
+                                                        <FormControlLabel
+                                                            key={i}
+                                                            control={
+                                                                <Checkbox
+                                                                    checked={((answers[q.id] as string[]) || []).includes(optionTrimmed)}
+                                                                    onChange={() => handleCheckboxAnswerToggle(q.id, optionTrimmed)}
+                                                                />
+                                                            }
+                                                            label={optionTrimmed}
+                                                        />
+                                                    );
+                                                })}
+                                            </FormGroup>
+                                        </FormControl>
+                                    )}
+                                </Box>
+                            ))}
+                        </>
+                    )}
+                </DialogContent>
+                <DialogActions sx={{ p: 2, bgcolor: '#f5f5f5' }}>
+                    <Button onClick={() => setOpenModal(false)} color="inherit" disabled={submitting}>Mégse</Button>
+                    <Button onClick={handleSubmitApplication} variant="contained" disabled={submitting}>
+                        {submitting ? 'Beküldés...' : 'Jelentkezés Beküldése'}
+                    </Button>
+                </DialogActions>
+            </Dialog>
         </Container>
     );
 }

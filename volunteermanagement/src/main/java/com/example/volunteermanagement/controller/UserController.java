@@ -89,4 +89,19 @@ public class UserController {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, e.getMessage());
         }
     }
+
+    // 6. ÚJ: TAG ELTÁVOLÍTÁSA A SZERVEZETBŐL
+    @DeleteMapping("/{userId}/organizations/{orgId}")
+    @PreAuthorize("isAuthenticated()")
+    public ResponseEntity<Void> removeOrganizationMember(
+            @PathVariable Long userId,
+            @PathVariable Long orgId,
+            Principal principal) {
+        try {
+            userService.removeMemberFromOrganization(userId, orgId, principal.getName());
+            return ResponseEntity.ok().build();
+        } catch (RuntimeException e) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, e.getMessage());
+        }
+    }
 }

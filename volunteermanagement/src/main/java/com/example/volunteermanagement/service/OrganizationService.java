@@ -10,6 +10,7 @@ import com.example.volunteermanagement.model.User;
 import com.example.volunteermanagement.repository.OrganizationMemberRepository;
 import com.example.volunteermanagement.repository.OrganizationRepository;
 import com.example.volunteermanagement.repository.UserRepository;
+import com.example.volunteermanagement.model.ApplicationStatus;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -78,27 +79,23 @@ public class OrganizationService {
 
         List<OrganizationMember> pending;
 
-        // Ha globális admin, mindent lát
         if (admin.getRole() == com.example.volunteermanagement.model.Role.SYS_ADMIN) {
             pending = organizationMemberRepository.findByStatus(MembershipStatus.PENDING);
         } else {
-            // Megkeressük azokat a szervezeteket, ahol a lekérdező APPROVED vezető
             List<Long> myOrgIds = admin.getMemberships().stream()
                     .filter(m -> m.getStatus() == MembershipStatus.APPROVED &&
                             (m.getRole() == OrganizationRole.OWNER || m.getRole() == OrganizationRole.ORGANIZER))
                     .map(m -> m.getOrganization().getId())
                     .collect(Collectors.toList());
 
-            // Ha nincs ilyen szervezet, üres listát adunk vissza
             if (myOrgIds.isEmpty()) {
                 return List.of();
             }
 
-            // Lekérjük a függő jelentkezéseket ezekre a szervezetekre
             pending = organizationMemberRepository.findByStatusAndOrganizationIdIn(MembershipStatus.PENDING, myOrgIds);
         }
 
-        // Átalakítjuk a Frontend által várt DTO formátumra
+        // JAVÍTOTT MAPPER: Hozzáadtuk a workArea adatokat ÉS a státuszt (9. paraméter)
         return pending.stream()
                 .map(m -> new PendingApplicationDTO(
                         m.getId(),
@@ -106,7 +103,13 @@ public class OrganizationService {
                         m.getUser().getEmail(),
                         m.getUser().getPhoneNumber(),
                         m.getOrganization().getName(),
-                        m.getOrganization().getId()
+                        m.getOrganization().getId(),
+                        null,   // workAreaId
+                        null,   // workAreaName
+                        ApplicationStatus.valueOf(m.getStatus().name()),
+                        null,   // eventId
+                        null,   // eventTitle
+                        java.util.Collections.emptyMap() // ÚJ: Üres válasz-map a szervezeti tagsághoz
                 )).collect(Collectors.toList());
     }
 

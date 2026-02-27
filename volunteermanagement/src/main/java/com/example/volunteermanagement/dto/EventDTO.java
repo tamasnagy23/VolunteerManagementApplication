@@ -33,7 +33,10 @@ public record EventDTO(
 
         // Levettük a @NotEmpty-t, így lehet üres a lista (opcionális)
         @Valid
-        List<ShiftDTO> shifts,
+        List<WorkAreaDTO> workAreas,
+
+        @Valid
+        List<EventQuestionDTO> questions,
 
         OrganizationDTO organization
 ) {}

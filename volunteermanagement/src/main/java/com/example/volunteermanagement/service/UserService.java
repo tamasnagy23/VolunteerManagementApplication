@@ -13,6 +13,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
+import java.util.Objects;
 import java.util.stream.Collectors;
 
 @Service
@@ -45,31 +46,37 @@ public class UserService {
             targetUsers = userRepository.findUsersByOrganizationIds(myManagedOrgIds);
         }
 
-        // Itt a konvertálás a DTO-ba marad a korábbi (szervezeti tagságokat is tartalmazó) verzió
-        // ... a getTeamMembers metóduson belül ...
         return targetUsers.stream().map(user -> {
-            List<OrgMembershipDTO> orgDTOs = user.getMemberships().stream()
-                    .map(m -> new OrgMembershipDTO(
-                            m.getOrganization().getId(),
-                            m.getOrganization().getName(),
-                            m.getRole().name(),
-                            m.getStatus().name() // <--- EZT AZ EGY SORT ADD HOZZÁ ITT IS!
-                    ))
-                    .collect(Collectors.toList());
-            // ...
 
-            return new TeamMemberDTO(
-                    user.getId(),
-                    user.getName(),
-                    user.getEmail(),
-                    user.getRole().name(), // Ez most már csak USER vagy SYS_ADMIN lesz
-                    user.getPhoneNumber(),
-                    orgDTOs
-            );
-        }).collect(Collectors.toList());
+                    // 1. ÚJ SZŰRÉS: Csak az APPROVED tagságokat vesszük figyelembe a csapatlistánál!
+                    List<OrgMembershipDTO> orgDTOs = user.getMemberships().stream()
+                            .filter(m -> m.getStatus() == MembershipStatus.APPROVED) // <--- EZT ADTUK HOZZÁ
+                            .map(m -> new OrgMembershipDTO(
+                                    m.getOrganization().getId(),
+                                    m.getOrganization().getName(),
+                                    m.getRole().name(),
+                                    m.getStatus().name()
+                            ))
+                            .collect(Collectors.toList());
+
+                    // 2. ÚJ VÉDELEM: Ha az illetőnek a szűrés után nincs semmilyen tagsága (pl. csak PENDING volt),
+                    // és a lekérdező nem SYS_ADMIN, akkor őt nem tesszük bele a listába!
+                    if (orgDTOs.isEmpty() && requester.getRole() != Role.SYS_ADMIN) {
+                        return null;
+                    }
+
+                    return new TeamMemberDTO(
+                            user.getId(),
+                            user.getName(),
+                            user.getEmail(),
+                            user.getRole().name(),
+                            user.getPhoneNumber(),
+                            orgDTOs
+                    );
+                })
+                .filter(Objects::nonNull) // 3. ÚJ VÉDELEM: Kiszűrjük a null értékeket a végső listából
+                .collect(Collectors.toList());
     }
-
-    // ... a meglévő metódusaid (pl. getTeamMembers) után illeszd be:
 
     @Transactional
     public void updateOrganizationRole(Long userId, Long orgId, String newRoleStr, String requesterEmail) {
@@ -124,6 +131,48 @@ public class UserService {
         // 6. Tényleges módosítás
         targetMembership.setRole(newRole);
         // A @Transactional miatt az adatbázis mentés automatikusan megtörténik a metódus végén
+    }
+
+    @Transactional
+    public void removeMemberFromOrganization(Long userId, Long orgId, String requesterEmail) {
+        User requester = userRepository.findByEmail(requesterEmail)
+                .orElseThrow(() -> new RuntimeException("Hiba a hitelesítésnél"));
+        User targetUser = userRepository.findById(userId)
+                .orElseThrow(() -> new RuntimeException("A célfelhasználó nem található"));
+
+        // 1. Tagság megkeresése
+        var targetMembership = targetUser.getMemberships().stream()
+                .filter(m -> m.getOrganization().getId().equals(orgId))
+                .findFirst()
+                .orElseThrow(() -> new RuntimeException("A felhasználó nem tagja ennek a szervezetnek."));
+
+        // 2. Jogosultság ellenőrzése (Csak Admin, vagy a szervezet Vezetője törölhet)
+        boolean isSysAdmin = requester.getRole() == Role.SYS_ADMIN;
+        boolean isRequesterLeaderHere = requester.getMemberships().stream()
+                .anyMatch(m -> m.getOrganization().getId().equals(orgId) &&
+                        (m.getRole() == OrganizationRole.OWNER || m.getRole() == OrganizationRole.ORGANIZER));
+
+        if (!isSysAdmin && !isRequesterLeaderHere) {
+            throw new RuntimeException("Nincs jogosultságod eltávolítani ezt a tagot!");
+        }
+
+        // 3. Utolsó vezető és ALAPÍTÓ védelme
+        if (targetMembership.getRole() == OrganizationRole.OWNER) {
+            throw new RuntimeException("A szervezet alapítóját (OWNER) nem lehet eltávolítani!");
+        }
+
+        if (targetMembership.getRole() == OrganizationRole.ORGANIZER) {
+            long leaderCount = targetMembership.getOrganization().getMembers().stream()
+                    .filter(m -> m.getRole() == OrganizationRole.OWNER || m.getRole() == OrganizationRole.ORGANIZER)
+                    .count();
+            if (leaderCount <= 1) {
+                throw new RuntimeException("Nem távolíthatod el a szervezet utolsó vezetőjét!");
+            }
+        }
+
+        // 4. Törlés (Feltételezve, hogy a User entitásodban a tagságok listája megfelelően kezeli a törlést)
+        targetUser.getMemberships().remove(targetMembership);
+        userRepository.save(targetUser);
     }
 
     @Transactional(readOnly = true)

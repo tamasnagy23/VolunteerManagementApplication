@@ -33,11 +33,11 @@ interface UserProfile {
     name: string;
     role: string;
     memberships: {
-        orgId?: number;                // A DTO ezt küldi
-        orgName?: string;              // A DTO ezt küldi
-        orgRole?: string;              // <--- A DTO EZT KÜLDI (Ez hiányzott!)
-        organization?: { id: number; name: string }; // Megtartjuk a biztonság kedvéért
-        role?: string;                 // Régi mező
+        orgId?: number;
+        orgName?: string;
+        orgRole?: string;
+        organization?: { id: number; name: string };
+        role?: string;
         status: string;
     }[];
 }
@@ -70,16 +70,11 @@ export default function Dashboard() {
         fetchData();
     }, []);
 
-    // Jogosultságok
-    const isLeader = !!user && (user.role === 'SYS_ADMIN' ||
+    // --- GLOBÁLIS JOGOSULTSÁG ---
+    // Csak arra használjuk, hogy eldöntsük, lássa-e a felső "Új Esemény" és "Csapat" gombokat
+    const isGlobalLeader = !!user && (user.role === 'SYS_ADMIN' ||
         user.memberships?.some(m =>
             ['OWNER', 'ORGANIZER'].includes(m.orgRole || m.role || '') &&
-            m.status === 'APPROVED'
-        ));
-
-    const canManageApplications = !!user && (user.role === 'SYS_ADMIN' ||
-        user.memberships?.some(m =>
-            ['OWNER', 'ORGANIZER', 'COORDINATOR'].includes(m.orgRole || m.role || '') &&
             m.status === 'APPROVED'
         ));
 
@@ -106,7 +101,7 @@ export default function Dashboard() {
                     Szia, {user?.name}! 👋
                 </Typography>
                 <Typography variant="body1" color="text.secondary">
-                    {isLeader
+                    {isGlobalLeader
                         ? "Kezeld a szervezeted eseményeit és önkénteseit egy helyen."
                         : "Böngészd a szervezetid aktuális eseményeit!"}
                 </Typography>
@@ -114,8 +109,8 @@ export default function Dashboard() {
 
             {error && <Alert severity="error" sx={{ mb: 3 }}>{error}</Alert>}
 
-            {/* --- VEZETŐI GOMBOK: Kikerültek a feltétel elé, mindig látszanak a vezetőnek --- */}
-            {isLeader && (
+            {/* --- VEZETŐI GOMBOK: Csak akkor jelennek meg, ha van BÁRMILYEN vezetői joga --- */}
+            {isGlobalLeader && (
                 <Box display="flex" gap={2} mb={4}>
                     <Button
                         variant="contained"
@@ -142,18 +137,17 @@ export default function Dashboard() {
             {events.length === 0 ? (
                 <Paper sx={{ p: 4, textAlign: 'center', bgcolor: '#f9f9f9', mt: 2 }}>
                     <Typography variant="h6" color="text.secondary" gutterBottom>
-                        {isLeader
+                        {isGlobalLeader
                             ? "Még nem hoztál létre eseményt."
                             : "Még nincsenek itt események."}
                     </Typography>
                     <Typography variant="body2" color="text.secondary">
-                        {isLeader
+                        {isGlobalLeader
                             ? "Kattints az 'Új Esemény' gombra a kezdéshez!"
                             : "Csatlakozz egy szervezethez a Szervezetek menüpontban, vagy várj a jóváhagyásra!"}
                     </Typography>
                 </Paper>
             ) : (
-                // Itt jön a csoportosított listázás (Object.entries(groupedEvents)...)
                 Object.entries(groupedEvents).map(([orgName, orgEvents]) => (
                     <Box key={orgName} sx={{ mb: 6 }}>
                         <Typography variant="h5" sx={{ mb: 3, fontWeight: 'bold', borderBottom: '2px solid #1976d2', display: 'inline-block', pb: 1 }}>
@@ -165,14 +159,29 @@ export default function Dashboard() {
                             gridTemplateColumns={{ xs: '1fr', sm: 'repeat(2, 1fr)', md: 'repeat(3, 1fr)' }}
                             gap={3}
                         >
-                            {orgEvents.map((event) => (
-                                <EventCard
-                                    key={event.id}
-                                    event={event}
-                                    isLeader={isLeader}
-                                    canManageApplications={canManageApplications}
-                                />
-                            ))}
+                            {orgEvents.map((event) => {
+                                // 1. Megkeressük, hogy az adott esemény szervezetéhez (orgId) van-e tagsága a usernek
+                                const eventOrgId = event.organization?.id;
+                                const myMembership = user?.memberships?.find(
+                                    m => (m.orgId === eventOrgId || m.organization?.id === eventOrgId) && m.status === 'APPROVED'
+                                );
+
+                                // 2. Mi a konkrét szerepköre EBBEN a szervezetben?
+                                const myRoleInThisOrg = myMembership?.orgRole || myMembership?.role || '';
+
+                                // 3. Kiszámoljuk a jogosultságokat KIFEJEZETTEN erre az eseményre
+                                const isLeaderForThisEvent = user?.role === 'SYS_ADMIN' || ['OWNER', 'ORGANIZER'].includes(myRoleInThisOrg);
+                                const canManageAppsForThisEvent = user?.role === 'SYS_ADMIN' || ['OWNER', 'ORGANIZER', 'COORDINATOR'].includes(myRoleInThisOrg);
+
+                                return (
+                                    <EventCard
+                                        key={event.id}
+                                        event={event}
+                                        isLeader={isLeaderForThisEvent}
+                                        canManageApplications={canManageAppsForThisEvent}
+                                    />
+                                );
+                            })}
                         </Box>
                     </Box>
                 ))

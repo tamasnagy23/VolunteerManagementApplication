@@ -2,6 +2,7 @@ package com.example.volunteermanagement.model;
 
 import com.fasterxml.jackson.annotation.JsonFormat; // <--- EZT NE FELEJTSD EL!
 import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.fasterxml.jackson.annotation.JsonManagedReference;
 import jakarta.persistence.*;
 import lombok.*;
 import java.time.LocalDateTime;
@@ -38,11 +39,23 @@ public class Event {
 
     // -------------------------------------
 
+    // Az eseményhez tartozó munkaterületek
     @OneToMany(mappedBy = "event", cascade = CascadeType.ALL, orphanRemoval = true)
-    private List<Shift> shifts = new ArrayList<>();
+    @Builder.Default
+    @JsonManagedReference
+    private List<WorkArea> workAreas = new ArrayList<>();
 
-    public void addShift(Shift shift) {
+    // Az eseményhez tartozó extra kérdések (kérdőív)
+    @OneToMany(mappedBy = "event", cascade = CascadeType.ALL, orphanRemoval = true)
+    @Builder.Default
+    @JsonManagedReference
+    private List<EventQuestion> questions = new ArrayList<>();
+
+    /*@OneToMany(mappedBy = "event", cascade = CascadeType.ALL, orphanRemoval = true)
+    private List<Shift> shifts = new ArrayList<>();*/
+
+    /*public void addShift(Shift shift) {
         shifts.add(shift);
         shift.setEvent(this);
-    }
+    }*/
 }

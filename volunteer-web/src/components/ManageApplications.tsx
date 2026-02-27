@@ -1,301 +1,305 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
-    Container, Typography, Box, Paper, Button, Chip, IconButton, CircularProgress,
-    Dialog, DialogTitle, DialogContent, DialogActions, TextField, Grid,
-    Card, CardContent, CardHeader, Divider, List, ListItem, ListItemText,
-    Checkbox, ListItemIcon, Alert, ListItemButton
-} from '@mui/material'; // <--- ListItemButton HOZZÁADVA
+    Container, Typography, Box, Paper, Button, CircularProgress,
+    Alert, Tabs, Tab, Table, TableBody, TableCell, TableContainer,
+    TableHead, TableRow, Select, MenuItem, FormControl, InputLabel,
+    TableSortLabel
+} from '@mui/material';
+import type { SelectChangeEvent } from '@mui/material';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
-import AddCircleOutlineIcon from '@mui/icons-material/AddCircleOutline';
-import CheckIcon from '@mui/icons-material/Check';
-import CloseIcon from '@mui/icons-material/Close';
+import DownloadIcon from '@mui/icons-material/Download';
 import api from '../api/axios';
+import axios from 'axios';
 
-// Típusok
-interface User { id: number; username: string; email: string; }
-interface WorkArea { id: number; name: string; }
-interface Shift { id: number; name: string; startTime: string; endTime: string; volunteers?: User[]; }
+// --- INTERFÉSZEK ---
 interface Application {
     id: number;
-    user: User;
-    workArea: WorkArea;
-    status: 'PENDING' | 'APPROVED' | 'REJECTED';
+    userName: string;
+    userEmail: string;
+    userPhone: string;
+    workAreaName: string;
+    status: 'PENDING' | 'APPROVED' | 'REJECTED' | 'WITHDRAWN';
+    answers: Record<string, string>; // ÚJ: Itt érkeznek a kérdőív válaszai
 }
+
+interface WorkArea {
+    id: number;
+    name: string;
+}
+
+interface EventQuestion {
+    id: number;
+    questionText: string;
+}
+
+interface EventData {
+    id: number;
+    title: string;
+    workAreas: WorkArea[];
+    questions: EventQuestion[]; // ÚJ: Szükséges az export oszlopaihoz
+}
+
+type SortField = 'userName' | 'workAreaName';
+type SortOrder = 'asc' | 'desc';
 
 export default function ManageApplications() {
     const { id } = useParams<{ id: string }>();
     const navigate = useNavigate();
 
+    const [event, setEvent] = useState<EventData | null>(null);
     const [applications, setApplications] = useState<Application[]>([]);
-    const [shifts, setShifts] = useState<Shift[]>([]);
     const [loading, setLoading] = useState<boolean>(true);
+    const [error, setError] = useState<string | null>(null);
 
-    // Modalok állapota
-    const [openCreateShift, setOpenCreateShift] = useState(false);
-    const [openAddPeople, setOpenAddPeople] = useState(false);
-
-    // Form adatok
-    const [newShiftName, setNewShiftName] = useState("");
-    const [newShiftStart, setNewShiftStart] = useState("");
-    const [newShiftEnd, setNewShiftEnd] = useState("");
-
-    // Tömeges hozzáadáshoz
-    const [targetShiftId, setTargetShiftId] = useState<number | null>(null);
-    const [selectedVolunteers, setSelectedVolunteers] = useState<number[]>([]);
-
-    useEffect(() => {
-        fetchData();
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [id]);
+    const [currentTab, setCurrentTab] = useState<number>(0);
+    const [areaFilter, setAreaFilter] = useState<string>('ALL');
+    const [statusFilter, setStatusFilter] = useState<string>('ALL');
+    const [sortBy, setSortBy] = useState<SortField>('userName');
+    const [sortOrder, setSortOrder] = useState<SortOrder>('asc');
 
     const fetchData = async () => {
         try {
             setLoading(true);
-            const [appsRes, shiftsRes] = await Promise.all([
-                api.get(`/applications/event/${id}`),
-                api.get(`/shifts/event/${id}`)
+            const [eventRes, appsRes] = await Promise.all([
+                api.get(`/events/${id}`),
+                api.get(`/applications/event/${id}`)
             ]);
-            setApplications(appsRes.data);
-            setShifts(shiftsRes.data);
-        } catch (error) {
-            console.error(error);
+
+            setEvent(eventRes.data);
+            setApplications(Array.isArray(appsRes.data) ? appsRes.data : []);
+        } catch (err) {
+            if (axios.isAxiosError(err) && err.response?.status === 403) {
+                setError("Nincs jogosultságod a jelentkezők megtekintéséhez.");
+            } else {
+                setError("Hiba történt az adatok betöltésekor.");
+            }
         } finally {
             setLoading(false);
         }
     };
 
-    // --- MŰSZAK LÉTREHOZÁSA ---
-    const handleCreateShift = async () => {
-        if (!newShiftName || !newShiftStart || !newShiftEnd) return alert("Minden mező kötelező!");
+    useEffect(() => {
+        if (id) fetchData();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [id]);
+
+    const handleStatusChange = async (appId: number, eventSelect: SelectChangeEvent) => {
+        const newStatus = eventSelect.target.value;
         try {
-            await api.post('/shifts/create', {
-                eventId: id,
-                name: newShiftName,
-                startTime: newShiftStart,
-                endTime: newShiftEnd
+            await api.put(`/applications/${appId}/status`, null, { params: { status: newStatus } });
+            fetchData();
+        } catch {
+            alert("Nem sikerült módosítani a státuszt.");
+        }
+    };
+
+    const handleSort = (field: SortField) => {
+        const isAsc = sortBy === field && sortOrder === 'asc';
+        setSortOrder(isAsc ? 'desc' : 'asc');
+        setSortBy(field);
+    };
+
+    const filteredAndSortedApplications = useMemo(() => {
+        let filtered = [...applications];
+
+        if (currentTab === 0) {
+            filtered = filtered.filter(app => app.status === 'PENDING');
+        } else if (currentTab === 1) {
+            filtered = filtered.filter(app => app.status === 'APPROVED');
+        } else if (currentTab === 2) {
+            filtered = filtered.filter(app => app.status === 'REJECTED');
+        } else if (currentTab === 3) {
+            filtered = filtered.filter(app => app.status === 'WITHDRAWN');
+        } else if (event?.workAreas) {
+            const targetAreaName = event.workAreas[currentTab - 4]?.name;
+            filtered = filtered.filter(app => app.workAreaName === targetAreaName);
+        }
+
+        if (areaFilter !== 'ALL') {
+            filtered = filtered.filter(app => app.workAreaName === areaFilter);
+        }
+        if (statusFilter !== 'ALL') {
+            filtered = filtered.filter(app => app.status === statusFilter);
+        }
+
+        filtered.sort((a, b) => {
+            const aVal = (sortBy === 'userName' ? a.userName : a.workAreaName) || '';
+            const bVal = (sortBy === 'userName' ? b.userName : b.workAreaName) || '';
+            return sortOrder === 'asc'
+                ? aVal.localeCompare(bVal, 'hu')
+                : bVal.localeCompare(aVal, 'hu');
+        });
+
+        return filtered;
+    }, [applications, currentTab, areaFilter, statusFilter, sortBy, sortOrder, event]);
+
+    // --- ÚJ, DINAMIKUS EXPORT FUNKCIÓ ---
+    const exportToCSV = () => {
+        // 1. Alap oszlopfejlécek
+        const baseHeaders = ['Név', 'Email', 'Telefon', 'Terület', 'Státusz'];
+
+        // 2. Egyedi kérdések kigyűjtése oszlopfejlécnek
+        const questionTexts = event?.questions?.map(q => q.questionText) || [];
+        const allHeaders = [...baseHeaders, ...questionTexts];
+
+        // 3. Adatsorok összeállítása
+        const rows = filteredAndSortedApplications.map(app => {
+            const baseData = [
+                `"${app.userName || ''}"`,
+                `"${app.userEmail || ''}"`,
+                `"${app.userPhone || ''}"`,
+                `"${app.workAreaName || ''}"`,
+                `"${app.status}"`
+            ];
+
+            // Válaszok hozzáadása a megfelelő kérdés-oszlophoz
+            const questionAnswers = questionTexts.map(qText => {
+                const answer = app.answers && app.answers[qText] ? app.answers[qText] : '-';
+                return `"${answer}"`;
             });
-            setOpenCreateShift(false);
-            setNewShiftName(""); setNewShiftStart(""); setNewShiftEnd("");
-            fetchData();
-        } catch (error) {
-            console.error(error);
-            alert("Hiba a létrehozáskor");
-        }
+
+            return [...baseData, ...questionAnswers];
+        });
+
+        const csvContent = [allHeaders.join(','), ...rows.map(e => e.join(','))].join('\n');
+
+        // UTF-8 BOM és Blob az ékezetek miatt
+        const blob = new Blob(["\uFEFF" + csvContent], { type: 'text/csv;charset=utf-8;' });
+        const link = document.body.appendChild(document.createElement("a"));
+        link.href = URL.createObjectURL(blob);
+        link.download = `jelentkezok_${event?.title || 'lista'}.csv`;
+        link.click();
+        document.body.removeChild(link);
     };
 
-    // --- EMBEREK HOZZÁADÁSA (TÖMEGES) ---
-    const handleOpenAddPeople = (shiftId: number) => {
-        setTargetShiftId(shiftId);
-        setSelectedVolunteers([]); // Reset
-        setOpenAddPeople(true);
-    };
-
-    const handleBulkAssign = async () => {
-        if (!targetShiftId || selectedVolunteers.length === 0) return;
-
-        try {
-            const promises = selectedVolunteers.map(userId =>
-                api.post(`/shifts/${targetShiftId}/assign/${userId}`)
-            );
-            await Promise.all(promises);
-
-            setOpenAddPeople(false);
-            fetchData();
-        } catch (error) {
-            console.error(error);
-            alert("Hiba történt a hozzárendeléskor.");
-        }
-    };
-
-    const getAvailableVolunteers = (shiftId: number) => {
-        const currentShift = shifts.find(s => s.id === shiftId);
-        const assignedIds = currentShift?.volunteers?.map(v => v.id) || [];
-
-        return applications.filter(app =>
-            app.status === 'APPROVED' && !assignedIds.includes(app.user.id)
-        );
-    };
-
-    const handleToggleVolunteer = (userId: number) => {
-        const currentIndex = selectedVolunteers.indexOf(userId);
-        const newChecked = [...selectedVolunteers];
-
-        if (currentIndex === -1) {
-            newChecked.push(userId);
-        } else {
-            newChecked.splice(currentIndex, 1);
-        }
-        setSelectedVolunteers(newChecked);
-    };
-
-    const formatTime = (date: string) => new Date(date).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
-    const formatDate = (date: string) => new Date(date).toLocaleDateString([], {month: 'short', day: 'numeric'});
-
-    const changeStatus = async (appId: number, status: string) => {
-        try {
-            await api.put(`/applications/${appId}/status`, null, { params: { status } });
-            fetchData();
-        } catch (e) { console.error(e); }
-    };
-
-    if (loading) return <Box display="flex" justifyContent="center" mt={5}><CircularProgress /></Box>;
+    if (loading) return <Box display="flex" justifyContent="center" mt={10}><CircularProgress /></Box>;
 
     return (
-        <Container sx={{ mt: 4, mb: 10 }}>
-            {/* FEJLÉC */}
+        <Container maxWidth="xl" sx={{ mt: 4, mb: 10 }}>
             <Box display="flex" justifyContent="space-between" alignItems="center" mb={4}>
                 <Box display="flex" alignItems="center">
                     <Button startIcon={<ArrowBackIcon />} onClick={() => navigate('/dashboard')} sx={{ mr: 2 }}>Vissza</Button>
-                    <Typography variant="h4">Beosztás Tervező</Typography>
+                    <Typography variant="h4" fontWeight="bold">
+                        {event?.title} jelentkezői
+                    </Typography>
                 </Box>
-                <Button variant="contained" startIcon={<AddCircleOutlineIcon />} onClick={() => setOpenCreateShift(true)}>
-                    Új Műszak
+                <Button variant="contained" color="success" startIcon={<DownloadIcon />} onClick={exportToCSV}>
+                    Lista letöltése (.CSV)
                 </Button>
             </Box>
 
-            <Grid container spacing={3}>
+            {error && <Alert severity="error" sx={{ mb: 3 }}>{error}</Alert>}
 
-                {/* 1. BAL OSZLOP: JELENTKEZŐK LISTÁJA */}
-                <Grid size={{ xs: 12, md: 3 }} sx={{ borderRight: '1px solid #eee' }}>
-                    <Typography variant="h6" gutterBottom>Jelentkezések</Typography>
-                    <Box sx={{ maxHeight: '70vh', overflowY: 'auto' }}>
-                        {applications.length === 0 && <Typography variant="body2" color="text.secondary">Nincs jelentkező.</Typography>}
-                        {applications.map(app => (
-                            <Paper key={app.id} elevation={1} sx={{ p: 1.5, mb: 1.5, borderLeft: `4px solid ${app.status === 'APPROVED' ? 'green' : app.status === 'PENDING' ? 'orange' : 'red'}` }}>
-                                <Typography variant="subtitle2">{app.user.username}</Typography>
-                                <Typography variant="caption" display="block">{app.workArea.name}</Typography>
+            <Box sx={{ borderBottom: 1, borderColor: 'divider', mb: 3 }}>
+                <Tabs
+                    value={currentTab}
+                    onChange={(_e, v) => { setCurrentTab(v); setAreaFilter('ALL'); setStatusFilter('ALL'); }}
+                    variant="scrollable"
+                    scrollButtons="auto"
+                >
+                    <Tab label="⏳ Elbírálásra vár" />
+                    <Tab label="✅ Összes Elfogadott" />
+                    <Tab label="❌ Összes Elutasított" />
+                    <Tab label="🏳️ Visszavont" />
+                    {event?.workAreas.map((area) => (
+                        <Tab key={area.id} label={`📍 ${area.name}`} />
+                    ))}
+                </Tabs>
+            </Box>
 
-                                {app.status === 'PENDING' && (
-                                    <Box mt={1} display="flex" gap={1}>
-                                        <IconButton size="small" color="success" onClick={() => changeStatus(app.id, 'APPROVED')}><CheckIcon fontSize="small" /></IconButton>
-                                        <IconButton size="small" color="error" onClick={() => changeStatus(app.id, 'REJECTED')}><CloseIcon fontSize="small" /></IconButton>
-                                    </Box>
-                                )}
-                                {app.status === 'APPROVED' && <Chip label="Jöhet" size="small" color="success" variant="outlined" sx={{ mt: 0.5 }} />}
-                            </Paper>
-                        ))}
-                    </Box>
-                </Grid>
+            <Paper variant="outlined" sx={{ p: 2, mb: 3, bgcolor: '#fbfbfb', display: 'flex', gap: 2, alignItems: 'center', flexWrap: 'wrap' }}>
+                {(currentTab <= 3) && (
+                    <FormControl size="small" sx={{ minWidth: 200 }}>
+                        <InputLabel>Munkaterület</InputLabel>
+                        <Select value={areaFilter} label="Munkaterület" onChange={(e) => setAreaFilter(e.target.value)}>
+                            <MenuItem value="ALL">Összes terület</MenuItem>
+                            {event?.workAreas.map((area) => (
+                                <MenuItem key={area.id} value={area.name}>{area.name}</MenuItem>
+                            ))}
+                        </Select>
+                    </FormControl>
+                )}
 
-                {/* 2. JOBB OSZLOP: MŰSZAKOK (KÁRTYÁK) */}
-                <Grid size={{ xs: 12, md: 9 }}>
-                    <Typography variant="h6" gutterBottom sx={{ mb: 2 }}>Műszakok</Typography>
+                {currentTab > 3 && (
+                    <FormControl size="small" sx={{ minWidth: 200 }}>
+                        <InputLabel>Státusz szűrő</InputLabel>
+                        <Select value={statusFilter} label="Státusz szűrő" onChange={(e) => setStatusFilter(e.target.value)}>
+                            <MenuItem value="ALL">Összes státusz</MenuItem>
+                            <MenuItem value="PENDING">Elbírálás alatt</MenuItem>
+                            <MenuItem value="APPROVED">Elfogadva</MenuItem>
+                            <MenuItem value="REJECTED">Elutasítva</MenuItem>
+                            <MenuItem value="WITHDRAWN">Visszavont</MenuItem>
+                        </Select>
+                    </FormControl>
+                )}
 
-                    <Grid container spacing={3}>
-                        {shifts.map(shift => (
-                            <Grid size={{ xs: 12, md: 6, lg: 4 }} key={shift.id}>
-                                <Card elevation={3} sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
-                                    <CardHeader
-                                        title={shift.name}
-                                        subheader={`${formatDate(shift.startTime)} ${formatTime(shift.startTime)} - ${formatTime(shift.endTime)}`}
-                                        sx={{ bgcolor: '#f5f5f5', pb: 1 }}
-                                        titleTypographyProps={{ variant: 'h6' }}
-                                    />
-                                    <Divider />
-                                    <CardContent sx={{ flexGrow: 1, p: 1 }}>
-                                        <List dense>
-                                            {shift.volunteers && shift.volunteers.length > 0 ? (
-                                                shift.volunteers.map(vol => (
-                                                    <ListItem key={vol.id} sx={{ bgcolor: '#fff', borderRadius: 1, mb: 0.5, border: '1px solid #eee' }}>
-                                                        <ListItemText primary={vol.username} />
-                                                    </ListItem>
-                                                ))
-                                            ) : (
-                                                <Typography variant="body2" color="text.secondary" align="center" sx={{ py: 2 }}>
-                                                    Még nincs beosztott ember.
-                                                </Typography>
-                                            )}
-                                        </List>
-                                    </CardContent>
-                                    <Divider />
-                                    <Button
-                                        fullWidth
-                                        variant="contained"
-                                        color="primary"
-                                        startIcon={<AddCircleOutlineIcon />}
-                                        onClick={() => handleOpenAddPeople(shift.id)}
-                                        sx={{ borderRadius: 0, py: 1.5 }}
-                                    >
-                                        Emberek hozzáadása
-                                    </Button>
-                                </Card>
-                            </Grid>
-                        ))}
-                    </Grid>
-                </Grid>
-            </Grid>
+                <Typography variant="body2" sx={{ ml: 'auto', fontWeight: 500 }}>
+                    Találatok: {filteredAndSortedApplications.length} fő
+                </Typography>
+            </Paper>
 
-            {/* --- MODAL: ÚJ MŰSZAK --- */}
-            <Dialog open={openCreateShift} onClose={() => setOpenCreateShift(false)}>
-                <DialogTitle>Új Műszak Létrehozása</DialogTitle>
-                <DialogContent>
-                    <Grid container spacing={2} sx={{ mt: 0.5 }}>
-                        <Grid size={{ xs: 12 }}>
-                            <TextField label="Műszak Neve (pl. Pultos Reggel)" fullWidth value={newShiftName} onChange={e => setNewShiftName(e.target.value)} autoFocus />
-                        </Grid>
-                        <Grid size={{ xs: 6 }}>
-                            <TextField type="datetime-local" label="Kezdés" fullWidth InputLabelProps={{shrink: true}} value={newShiftStart} onChange={e => setNewShiftStart(e.target.value)} />
-                        </Grid>
-                        <Grid size={{ xs: 6 }}>
-                            <TextField type="datetime-local" label="Vége" fullWidth InputLabelProps={{shrink: true}} value={newShiftEnd} onChange={e => setNewShiftEnd(e.target.value)} />
-                        </Grid>
-                    </Grid>
-                </DialogContent>
-                <DialogActions>
-                    <Button onClick={() => setOpenCreateShift(false)}>Mégse</Button>
-                    <Button onClick={handleCreateShift} variant="contained">Létrehozás</Button>
-                </DialogActions>
-            </Dialog>
-
-            {/* --- MODAL: EMBEREK HOZZÁADÁSA --- */}
-            <Dialog open={openAddPeople} onClose={() => setOpenAddPeople(false)} maxWidth="sm" fullWidth>
-                <DialogTitle>Önkéntesek kiválasztása</DialogTitle>
-                <DialogContent dividers>
-                    {targetShiftId && getAvailableVolunteers(targetShiftId).length === 0 ? (
-                        <Alert severity="info">Nincs elérhető, elfogadott jelentkező erre a műszakra.</Alert>
-                    ) : (
-                        <List>
-                            {targetShiftId && getAvailableVolunteers(targetShiftId).map((app) => {
-                                const labelId = `checkbox-list-label-${app.user.id}`;
-                                return (
-                                    // JAVÍTÁS: ListItemButton használata a kattinthatóságért
-                                    <ListItem key={app.user.id} disablePadding>
-                                        <ListItemButton onClick={() => handleToggleVolunteer(app.user.id)}>
-                                            <ListItemIcon>
-                                                <Checkbox
-                                                    edge="start"
-                                                    checked={selectedVolunteers.indexOf(app.user.id) !== -1}
-                                                    tabIndex={-1}
-                                                    disableRipple
-                                                    inputProps={{ 'aria-labelledby': labelId }}
-                                                />
-                                            </ListItemIcon>
-                                            <ListItemText
-                                                id={labelId}
-                                                primary={app.user.username}
-                                                secondary={`${app.workArea.name} - ${app.user.email}`}
-                                            />
-                                        </ListItemButton>
-                                    </ListItem>
-                                );
-                            })}
-                        </List>
-                    )}
-                </DialogContent>
-                <DialogActions>
-                    <Button onClick={() => setOpenAddPeople(false)}>Mégse</Button>
-                    <Button
-                        onClick={handleBulkAssign}
-                        variant="contained"
-                        color="primary"
-                        disabled={selectedVolunteers.length === 0}
-                    >
-                        Hozzáadás ({selectedVolunteers.length} fő)
-                    </Button>
-                </DialogActions>
-            </Dialog>
-
+            <TableContainer component={Paper} elevation={3}>
+                <Table>
+                    <TableHead sx={{ bgcolor: '#f5f5f5' }}>
+                        <TableRow>
+                            <TableCell>
+                                <TableSortLabel active={sortBy === 'userName'} direction={sortOrder} onClick={() => handleSort('userName')}>
+                                    <strong>Név</strong>
+                                </TableSortLabel>
+                            </TableCell>
+                            <TableCell><strong>Elérhetőség</strong></TableCell>
+                            <TableCell>
+                                <TableSortLabel active={sortBy === 'workAreaName'} direction={sortOrder} onClick={() => handleSort('workAreaName')}>
+                                    <strong>Terület</strong>
+                                </TableSortLabel>
+                            </TableCell>
+                            <TableCell align="center"><strong>Művelet</strong></TableCell>
+                        </TableRow>
+                    </TableHead>
+                    <TableBody>
+                        {filteredAndSortedApplications.length === 0 ? (
+                            <TableRow>
+                                <TableCell colSpan={4} align="center" sx={{ py: 3, color: 'text.secondary' }}>
+                                    Nincs megjeleníthető jelentkező ezen a listán.
+                                </TableCell>
+                            </TableRow>
+                        ) : (
+                            filteredAndSortedApplications.map((app) => (
+                                <TableRow key={app.id} hover>
+                                    <TableCell sx={{ fontWeight: 'bold' }}>{app.userName}</TableCell>
+                                    <TableCell>
+                                        <Typography variant="body2">{app.userEmail}</Typography>
+                                        <Typography variant="caption" color="text.secondary">{app.userPhone || 'Nincs tel.'}</Typography>
+                                    </TableCell>
+                                    <TableCell>{app.workAreaName}</TableCell>
+                                    <TableCell align="center">
+                                        <Select
+                                            value={app.status}
+                                            size="small"
+                                            onChange={(e) => handleStatusChange(app.id, e)}
+                                            sx={{
+                                                minWidth: 150,
+                                                fontWeight: 'bold',
+                                                bgcolor:
+                                                    app.status === 'APPROVED' ? '#e8f5e9' :
+                                                        app.status === 'REJECTED' ? '#ffebee' :
+                                                            app.status === 'WITHDRAWN' ? '#f5f5f5' : 'white',
+                                                color: app.status === 'WITHDRAWN' ? 'text.secondary' : 'inherit'
+                                            }}
+                                        >
+                                            <MenuItem value="PENDING">⏳ Függőben</MenuItem>
+                                            <MenuItem value="APPROVED">✅ Elfogadva</MenuItem>
+                                            <MenuItem value="REJECTED">❌ Elutasítva</MenuItem>
+                                            <MenuItem value="WITHDRAWN" disabled={app.status !== 'WITHDRAWN'}>🏳️ Visszavont</MenuItem>
+                                        </Select>
+                                    </TableCell>
+                                </TableRow>
+                            ))
+                        )}
+                    </TableBody>
+                </Table>
+            </TableContainer>
         </Container>
     );
 }
