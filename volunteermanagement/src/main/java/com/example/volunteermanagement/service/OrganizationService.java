@@ -95,7 +95,7 @@ public class OrganizationService {
             pending = organizationMemberRepository.findByStatusAndOrganizationIdIn(MembershipStatus.PENDING, myOrgIds);
         }
 
-        // JAVÍTOTT MAPPER: Hozzáadtuk a workArea adatokat ÉS a státuszt (9. paraméter)
+        // JAVÍTOTT MAPPER a kibővített DTO-hoz
         return pending.stream()
                 .map(m -> new PendingApplicationDTO(
                         m.getId(),
@@ -104,12 +104,16 @@ public class OrganizationService {
                         m.getUser().getPhoneNumber(),
                         m.getOrganization().getName(),
                         m.getOrganization().getId(),
-                        null,   // workAreaId
-                        null,   // workAreaName
+                        null,
+                        null,
                         ApplicationStatus.valueOf(m.getStatus().name()),
-                        null,   // eventId
-                        null,   // eventTitle
-                        java.util.Collections.emptyMap() // ÚJ: Üres válasz-map a szervezeti tagsághoz
+                        null,
+                        null,
+                        java.util.Collections.emptyMap(),
+                        null, // userAvatar
+                        null, // userJoinDate
+                        null,  // userOrgRole
+                        null //adminNote
                 )).collect(Collectors.toList());
     }
 

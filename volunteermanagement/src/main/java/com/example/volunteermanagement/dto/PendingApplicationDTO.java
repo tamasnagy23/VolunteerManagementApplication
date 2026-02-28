@@ -1,6 +1,7 @@
 package com.example.volunteermanagement.dto;
 
 import com.example.volunteermanagement.model.ApplicationStatus;
+import java.util.Map;
 
 public record PendingApplicationDTO(
         Long id,
@@ -14,6 +15,11 @@ public record PendingApplicationDTO(
         ApplicationStatus status,
         Long eventId,
         String eventTitle,
-        // ÚJ MEZŐ: Kérdés szövege -> Válasz szövege
-        java.util.Map<String, String> answers
+        Map<String, String> answers,
+        String userAvatar,
+        String userJoinDate,
+        String userOrgRole,
+
+        // --- ÚJ MEZŐ ---
+        String adminNote
 ) {}

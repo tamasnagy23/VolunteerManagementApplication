@@ -56,6 +56,9 @@ public class Application {
 
     private LocalDateTime appliedAt;
 
+    @Column(columnDefinition = "TEXT")
+    private String adminNote;
+
     @PrePersist
     protected void onCreate() {
         if (this.appliedAt == null) {

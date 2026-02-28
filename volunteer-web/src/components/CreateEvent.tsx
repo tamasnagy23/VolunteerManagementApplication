@@ -19,7 +19,6 @@ interface WorkAreaInput {
     capacity: number;
 }
 
-// ÚJ INTERFÉSZ A KÉRDÉSEKHEZ
 interface EventQuestionInput {
     id?: number;
     questionText: string;
@@ -46,7 +45,6 @@ export default function EventForm() {
         { name: '', description: '', capacity: 5 }
     ]);
 
-    // ÚJ STATE A KÉRDÉSEKNEZ
     const [questions, setQuestions] = useState<EventQuestionInput[]>([]);
 
     useEffect(() => {
@@ -66,7 +64,6 @@ export default function EventForm() {
                         })));
                     }
 
-                    // BETÖLTJÜK A KÉRDÉSEKET (ha vannak)
                     if (data.questions) {
                         setQuestions(data.questions.map((q: EventQuestionInput) => ({
                             id: q.id, questionText: q.questionText, questionType: q.questionType, options: q.options || '', isRequired: q.isRequired
@@ -82,7 +79,6 @@ export default function EventForm() {
         setEventData({ ...eventData, [e.target.name]: e.target.value });
     };
 
-    // Terület kezelők
     const handleAreaChange = (index: number, field: keyof WorkAreaInput, value: string | number) => {
         const newAreas = [...workAreas];
         newAreas[index] = { ...newAreas[index], [field]: value };
@@ -91,7 +87,6 @@ export default function EventForm() {
     const addArea = () => setWorkAreas([...workAreas, { name: '', description: '', capacity: 5 }]);
     const removeArea = (index: number) => setWorkAreas(workAreas.filter((_, i) => i !== index));
 
-    // Kérdés kezelők (ÚJ - ESLint és TS barát verzió)
     const handleQuestionChange = (
         index: number,
         field: keyof EventQuestionInput,
@@ -99,13 +94,11 @@ export default function EventForm() {
     ) => {
         const newQuestions = [...questions];
 
-        // Új érték beállítása típus-biztosan
         newQuestions[index] = {
             ...newQuestions[index],
             [field]: value
         } as EventQuestionInput;
 
-        // Ha visszavált szövegesre, ürítjük az opciókat
         if (field === 'questionType' && value === 'TEXT') {
             newQuestions[index].options = '';
         }
@@ -140,7 +133,7 @@ export default function EventForm() {
             startTime: fixDate(eventData.startTime),
             endTime: fixDate(eventData.endTime),
             workAreas: workAreas,
-            questions: questions // BEKÜLDJÜK A KÉRDÉSEKET IS
+            questions: questions
         };
 
         try {
@@ -168,7 +161,7 @@ export default function EventForm() {
                 {error && <Alert severity="error" sx={{ mb: 3 }}>{error}</Alert>}
 
                 <form onSubmit={handleSubmit}>
-                    {/* 1. ALAPADATOK (Változatlan) */}
+                    {/* 1. ALAPADATOK */}
                     <Box sx={{ mb: 5 }}>
                         <Typography variant="h6" color="primary" sx={{ mb: 2, fontWeight: 'bold' }}>1. Alapadatok</Typography>
                         <Grid container spacing={3}>
@@ -192,11 +185,30 @@ export default function EventForm() {
 
                     <Divider sx={{ mb: 4 }} />
 
-                    {/* 2. MUNKATERÜLETEK (Változatlan) */}
+                    {/* 2. MUNKATERÜLETEK (JAVÍTOTT RESZPONZÍV GOMB) */}
                     <Box sx={{ mb: 5 }}>
-                        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+                        <Box sx={{
+                            display: 'flex',
+                            flexDirection: { xs: 'column', sm: 'row' },
+                            justifyContent: 'space-between',
+                            alignItems: { xs: 'flex-start', sm: 'center' },
+                            gap: 2,
+                            mb: 2
+                        }}>
                             <Typography variant="h6" color="primary" sx={{ fontWeight: 'bold' }}>2. Munkaterületek</Typography>
-                            <Button startIcon={<AddCircleOutlineIcon />} onClick={addArea} variant="outlined" size="small">Terület hozzáadása</Button>
+                            <Button
+                                startIcon={<AddCircleOutlineIcon />}
+                                onClick={addArea}
+                                variant="outlined"
+                                size="small"
+                                sx={{
+                                    whiteSpace: 'nowrap',
+                                    flexShrink: 0,
+                                    width: { xs: '100%', sm: 'auto' }
+                                }}
+                            >
+                                Terület hozzáadása
+                            </Button>
                         </Box>
                         {workAreas.map((area, index) => (
                             <Paper key={index} variant="outlined" sx={{ p: 3, mb: 2, bgcolor: '#fcfcfc', borderRadius: 2 }}>
@@ -220,14 +232,32 @@ export default function EventForm() {
 
                     <Divider sx={{ mb: 4 }} />
 
-                    {/* 3. KÉRDŐÍV KÉSZÍTŐ (ÚJ RÉSZ) */}
+                    {/* 3. KÉRDŐÍV KÉSZÍTŐ (JAVÍTOTT RESZPONZÍV GOMB) */}
                     <Box sx={{ mb: 4 }}>
-                        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+                        <Box sx={{
+                            display: 'flex',
+                            flexDirection: { xs: 'column', sm: 'row' },
+                            justifyContent: 'space-between',
+                            alignItems: { xs: 'flex-start', sm: 'center' },
+                            gap: 2,
+                            mb: 3
+                        }}>
                             <Box>
                                 <Typography variant="h6" color="primary" sx={{ fontWeight: 'bold' }}>3. Jelentkezési Kérdőív (Opcionális)</Typography>
                                 <Typography variant="caption" color="text.secondary">Milyen extra adatokat kérsz az önkéntesektől?</Typography>
                             </Box>
-                            <Button startIcon={<AddCircleOutlineIcon />} onClick={addQuestion} variant="outlined" size="small" color="secondary">
+                            <Button
+                                startIcon={<AddCircleOutlineIcon />}
+                                onClick={addQuestion}
+                                variant="outlined"
+                                size="small"
+                                color="secondary"
+                                sx={{
+                                    whiteSpace: 'nowrap',
+                                    flexShrink: 0,
+                                    width: { xs: '100%', sm: 'auto' }
+                                }}
+                            >
                                 Kérdés hozzáadása
                             </Button>
                         </Box>

@@ -1,6 +1,7 @@
 package com.example.volunteermanagement.controller;
 
 import com.example.volunteermanagement.dto.ApplicationSubmitDTO;
+import com.example.volunteermanagement.dto.BulkEmailRequest;
 import com.example.volunteermanagement.dto.PendingApplicationDTO;
 import com.example.volunteermanagement.model.*;
 import com.example.volunteermanagement.repository.*;
@@ -41,30 +42,26 @@ public class ApplicationController {
             return ResponseEntity.badRequest().body("Legalább egy munkaterületet ki kell választanod!");
         }
 
-        // ÚJ LOGIKA: Minden kiválasztott területhez egy KÜLÖN jelentkezést (jegyet) hozunk létre!
         List<Application> applicationsToSave = new ArrayList<>();
 
         for (WorkArea wa : preferredAreas) {
-
-            // Extra ellenőrzés: jelentkezett-e már KIFEJEZETTEN ERRE a területre?
             boolean alreadyAppliedToThisArea = applicationRepository.findByUserAndEventId(user, event.getId())
                     .stream()
                     .anyMatch(app -> app.getAssignedWorkArea() != null && app.getAssignedWorkArea().getId().equals(wa.getId()));
 
             if (alreadyAppliedToThisArea) {
-                continue; // Ezt átugorjuk, ha ide már van jegye
+                continue;
             }
 
             Application application = Application.builder()
                     .user(user)
                     .event(event)
-                    .assignedWorkArea(wa) // Rögtön beosztottként mentjük, hogy különálló legyen!
+                    .assignedWorkArea(wa)
                     .preferredWorkAreas(List.of(wa))
                     .status(ApplicationStatus.PENDING)
                     .appliedAt(LocalDateTime.now())
                     .build();
 
-            // Válaszok csatolása az aktuális "jegyhez"
             if (request.answers() != null && !request.answers().isEmpty()) {
                 List<ApplicationAnswer> answersList = new ArrayList<>();
                 for (EventQuestion q : event.getQuestions()) {
@@ -140,11 +137,8 @@ public class ApplicationController {
 
         Event event = application.getEvent();
 
-        // JAVÍTÁS: Kifejtettük a jogosultság ellenőrzést
         boolean isOwner = application.getUser().getId().equals(user.getId());
-
         boolean isGlobalAdmin = user.getRole() == Role.SYS_ADMIN;
-
         boolean isOrgAdmin = user.getMemberships().stream()
                 .anyMatch(m -> m.getOrganization().getId().equals(event.getOrganization().getId())
                         && m.getStatus() == MembershipStatus.APPROVED
@@ -152,7 +146,6 @@ public class ApplicationController {
 
         boolean isAdmin = isGlobalAdmin || isOrgAdmin;
 
-        // 1. Ha az ÖNKÉNTES akarja módosítani a sajátját (csak visszaállíthatja PENDING-re)
         if (isOwner && !isAdmin) {
             if (status == ApplicationStatus.PENDING) {
                 application.setStatus(status);
@@ -162,7 +155,6 @@ public class ApplicationController {
             return ResponseEntity.status(403).body("Nincs jogod ehhez a művelethez!");
         }
 
-        // 2. Ha az ADMIN akarja módosítani
         if (isAdmin) {
             application.setStatus(status);
             applicationRepository.save(application);
@@ -172,14 +164,58 @@ public class ApplicationController {
         return ResponseEntity.status(403).body("Nincs jogosultságod a státusz módosításához!");
     }
 
-    // JAVÍTÁS: DTO Mappelés frissítése az új adatstruktúrához
+    // --- ÚJ: TÖMEGES STÁTUSZ MÓDOSÍTÁS ---
+    @PutMapping("/bulk-status")
+    @PreAuthorize("isAuthenticated()")
+    @Transactional
+    public ResponseEntity<?> updateBulkApplicationStatus(
+            @RequestBody List<Long> applicationIds,
+            @RequestParam("status") ApplicationStatus status,
+            Principal principal) {
+
+        User admin = userRepository.findByEmail(principal.getName()).orElseThrow();
+        boolean isGlobalAdmin = admin.getRole() == Role.SYS_ADMIN;
+
+        List<Application> applications = applicationRepository.findAllById(applicationIds);
+
+        for (Application app : applications) {
+            boolean isOrgAdmin = admin.getMemberships().stream()
+                    .anyMatch(m -> m.getOrganization().getId().equals(app.getEvent().getOrganization().getId())
+                            && m.getStatus() == MembershipStatus.APPROVED
+                            && (m.getRole() == OrganizationRole.ORGANIZER || m.getRole() == OrganizationRole.OWNER));
+
+            if (isGlobalAdmin || isOrgAdmin) {
+                app.setStatus(status);
+            }
+        }
+
+        applicationRepository.saveAll(applications);
+        return ResponseEntity.ok("Tömeges módosítás sikeres!");
+    }
+
+    @DeleteMapping("/{applicationId}")
+    @PreAuthorize("isAuthenticated()")
+    public ResponseEntity<?> withdrawApplication(@PathVariable("applicationId") Long applicationId, Principal principal) {
+        User user = userRepository.findByEmail(principal.getName()).orElseThrow();
+        Application application = applicationRepository.findById(applicationId)
+                .orElseThrow(() -> new RuntimeException("Jelentkezés nem található"));
+
+        if (!application.getUser().getId().equals(user.getId())) {
+            return ResponseEntity.status(403).body("Csak a saját jelentkezésedet vonhatod vissza!");
+        }
+
+        application.setStatus(ApplicationStatus.WITHDRAWN);
+        applicationRepository.save(application);
+
+        return ResponseEntity.ok("Jelentkezés visszavonva.");
+    }
+
+    // --- FRISSÍTETT MAPPER VALÓDI PROFIL ADATOKKAL ---
     private PendingApplicationDTO mapToDTO(Application app) {
-        String eventOrgName = (app.getEvent() != null && app.getEvent().getOrganization() != null)
+        String eventOrgName = app.getEvent() != null && app.getEvent().getOrganization() != null
                 ? app.getEvent().getOrganization().getName() : "Ismeretlen szervezet";
-
-        Long eventOrgId = (app.getEvent() != null && app.getEvent().getOrganization() != null)
+        Long eventOrgId = app.getEvent() != null && app.getEvent().getOrganization() != null
                 ? app.getEvent().getOrganization().getId() : null;
-
         Long eventId = app.getEvent() != null ? app.getEvent().getId() : null;
         String eventTitle = app.getEvent() != null ? app.getEvent().getTitle() : "Ismeretlen esemény";
 
@@ -189,23 +225,39 @@ public class ApplicationController {
         if (app.getAssignedWorkArea() != null) {
             displayAreaId = app.getAssignedWorkArea().getId();
             displayAreaName = app.getAssignedWorkArea().getName();
-        }
-        else if (app.getPreferredWorkAreas() != null && !app.getPreferredWorkAreas().isEmpty()) {
-            displayAreaName = app.getPreferredWorkAreas().stream()
-                    .map(WorkArea::getName)
-                    .collect(Collectors.joining(", "));
+        } else if (app.getPreferredWorkAreas() != null && !app.getPreferredWorkAreas().isEmpty()) {
+            displayAreaName = app.getPreferredWorkAreas().stream().map(WorkArea::getName).collect(Collectors.joining(", "));
             displayAreaId = app.getPreferredWorkAreas().get(0).getId();
         }
 
-        // --- ÚJ RÉSZ: Válaszok összegyűjtése a DTO számára ---
         java.util.Map<String, String> answersMap = new java.util.HashMap<>();
         if (app.getAnswers() != null) {
             for (ApplicationAnswer answer : app.getAnswers()) {
-                // A kulcs a kérdés szövege, az érték az önkéntes válasza
                 answersMap.put(answer.getQuestion().getQuestionText(), answer.getAnswerText());
             }
         }
-        // ----------------------------------------------------
+
+        // --- ÚJ: Profiladatok kinyerése a DTO számára (JAVÍTVA) ---
+        String userOrgRole = "Önkéntes";
+        String userJoinDate = "-";
+
+        if (app.getUser() != null && app.getEvent() != null) {
+            java.util.Optional<OrganizationMember> memberOpt = app.getUser().getMemberships().stream()
+                    .filter(m -> m.getOrganization().getId().equals(app.getEvent().getOrganization().getId()))
+                    .findFirst();
+
+            // Lambda (ifPresent) helyett hagyományos if-el ellenőrizzük, így módosíthatjuk a változókat:
+            if (memberOpt.isPresent()) {
+                OrganizationMember m = memberOpt.get();
+                userOrgRole = m.getRole() == OrganizationRole.ORGANIZER ? "Szervező" :
+                        m.getRole() == OrganizationRole.OWNER ? "Tulajdonos" : "Önkéntes";
+
+                if (m.getJoinedAt() != null) {
+                    java.time.format.DateTimeFormatter formatter = java.time.format.DateTimeFormatter.ofPattern("yyyy. MM. dd.");
+                    userJoinDate = m.getJoinedAt().format(formatter);
+                }
+            }
+        }
 
         return new PendingApplicationDTO(
                 app.getId(),
@@ -219,26 +271,76 @@ public class ApplicationController {
                 app.getStatus(),
                 eventId,
                 eventTitle,
-                answersMap // ÁTADJUK A VÁLASZOKAT (Ez a 12. paraméter)
+                answersMap,
+                null, // userAvatar (ha lesz profilkép)
+                userJoinDate,
+                userOrgRole,
+                app.getAdminNote()
         );
     }
 
-    // --- ÚJ: JELENTKEZÉS VISSZAVONÁSA (TÖRLÉSE) ---
-    @DeleteMapping("/{applicationId}")
+    // --- ÚJ: BELSŐ MEGJEGYZÉS MENTÉSE ---
+    @PutMapping("/{applicationId}/note")
     @PreAuthorize("isAuthenticated()")
-    public ResponseEntity<?> withdrawApplication(@PathVariable("applicationId") Long applicationId, Principal principal) {
-        User user = userRepository.findByEmail(principal.getName()).orElseThrow();
+    @Transactional
+    public ResponseEntity<?> updateAdminNote(
+            @PathVariable("applicationId") Long applicationId,
+            @RequestBody java.util.Map<String, String> payload,
+            Principal principal) {
+
+        User admin = userRepository.findByEmail(principal.getName()).orElseThrow();
         Application application = applicationRepository.findById(applicationId)
                 .orElseThrow(() -> new RuntimeException("Jelentkezés nem található"));
 
-        if (!application.getUser().getId().equals(user.getId())) {
-            return ResponseEntity.status(403).body("Csak a saját jelentkezésedet vonhatod vissza!");
+        Event event = application.getEvent();
+        boolean isGlobalAdmin = admin.getRole() == Role.SYS_ADMIN;
+        boolean isOrgAdmin = admin.getMemberships().stream()
+                .anyMatch(m -> m.getOrganization().getId().equals(event.getOrganization().getId())
+                        && m.getStatus() == MembershipStatus.APPROVED
+                        && (m.getRole() == OrganizationRole.ORGANIZER || m.getRole() == OrganizationRole.OWNER));
+
+        if (!isGlobalAdmin && !isOrgAdmin) {
+            return ResponseEntity.status(403).body("Nincs jogosultságod megjegyzést írni!");
         }
 
-        // TÖRLÉS HELYETT: Státusz átírása
-        application.setStatus(ApplicationStatus.WITHDRAWN); // Vagy "WITHDRAWN" string
-        applicationRepository.save(application);
+        application.setAdminNote(payload.get("note"));
+        applicationRepository.saveAndFlush(application);
 
-        return ResponseEntity.ok("Jelentkezés visszavonva.");
+        return ResponseEntity.ok("Megjegyzés sikeresen elmentve.");
+    }
+
+    // --- ÚJ: TÖMEGES ÜZENETKÜLDÉS (SZIMULÁCIÓ) ---
+    @PostMapping("/bulk-email")
+    @PreAuthorize("isAuthenticated()")
+    public ResponseEntity<?> sendBulkEmail(
+            @RequestBody BulkEmailRequest request,
+            Principal principal) {
+
+        User admin = userRepository.findByEmail(principal.getName()).orElseThrow();
+        boolean isGlobalAdmin = admin.getRole() == Role.SYS_ADMIN;
+
+        List<Application> applications = applicationRepository.findAllById(request.applicationIds());
+
+        int sentCount = 0;
+        for (Application app : applications) {
+            boolean isOrgAdmin = admin.getMemberships().stream()
+                    .anyMatch(m -> m.getOrganization().getId().equals(app.getEvent().getOrganization().getId())
+                            && m.getStatus() == MembershipStatus.APPROVED
+                            && (m.getRole() == OrganizationRole.ORGANIZER || m.getRole() == OrganizationRole.OWNER));
+
+            // Csak annak küldhetünk, akihez van jogunk
+            if (isGlobalAdmin || isOrgAdmin) {
+                // SZIMULÁCIÓ: E-mail kiírása a konzolra
+                System.out.println("==================================================");
+                System.out.println("📩 E-MAIL KÜLDÉSE FOLYAMATBAN...");
+                System.out.println("Címzett: " + app.getUser().getName() + " (" + app.getUser().getEmail() + ")");
+                System.out.println("Tárgy: " + request.subject());
+                System.out.println("Üzenet:\n" + request.message());
+                System.out.println("==================================================\n");
+                sentCount++;
+            }
+        }
+
+        return ResponseEntity.ok("Sikeresen szimulálva " + sentCount + " e-mail elküldése!");
     }
 }
