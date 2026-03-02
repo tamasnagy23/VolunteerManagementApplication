@@ -21,5 +21,6 @@ public record PendingApplicationDTO(
         String userOrgRole,
 
         // --- ÚJ MEZŐ ---
-        String adminNote
+        String adminNote,
+        String rejectionMessage
 ) {}

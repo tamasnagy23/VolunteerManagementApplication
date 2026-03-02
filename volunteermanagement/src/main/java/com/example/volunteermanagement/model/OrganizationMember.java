@@ -40,4 +40,7 @@ public class OrganizationMember {
 
     @Column(name = "joined_at")
     private LocalDateTime joinedAt;
+
+    @Column(columnDefinition = "TEXT")
+    private String rejectionMessage;
 }

@@ -4,6 +4,7 @@ import com.example.volunteermanagement.dto.TeamMemberDTO;
 import com.example.volunteermanagement.model.Role;
 import com.example.volunteermanagement.model.User;
 import com.example.volunteermanagement.repository.UserRepository;
+import com.example.volunteermanagement.service.EmailService;
 import com.example.volunteermanagement.service.UserService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
@@ -22,6 +23,7 @@ public class UserController {
 
     private final UserRepository userRepository;
     private final UserService userService;
+    private final EmailService emailService;
 
     // 1. Összes felhasználó lekérése (Csak SYS_ADMIN-nak)
     @GetMapping
@@ -103,5 +105,31 @@ public class UserController {
         } catch (RuntimeException e) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, e.getMessage());
         }
+    }
+
+    // Fent, a dependenciák között deklaráld az EmailService-t itt is!
+
+    // Segéd record a kérés beolvasásához (ezt teheted egy új BulkTeamEmailRequest.java DTO fájlba is, vagy az osztály aljára)
+    public record BulkTeamEmailRequest(List<Long> userIds, String subject, String message) {}
+
+    @PostMapping("/team/bulk-email")
+    @PreAuthorize("isAuthenticated()")
+    public ResponseEntity<?> sendBulkTeamEmail(
+            @RequestBody BulkTeamEmailRequest request,
+            Principal principal) {
+
+        // Validáció és jogosultság ellenőrzés (egyszerűsítve)
+        User admin = userRepository.findByEmail(principal.getName()).orElseThrow();
+
+        List<User> targetUsers = userRepository.findAllById(request.userIds());
+        List<String> bccEmails = targetUsers.stream()
+                .map(User::getEmail)
+                .toList();
+
+        if (!bccEmails.isEmpty()) {
+            emailService.sendBulkEmailBcc(bccEmails, request.subject(), request.message());
+        }
+
+        return ResponseEntity.ok("Csapat e-mailek elküldve " + bccEmails.size() + " tagnak!");
     }
 }

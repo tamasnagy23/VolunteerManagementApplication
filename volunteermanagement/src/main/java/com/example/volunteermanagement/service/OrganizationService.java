@@ -17,6 +17,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Optional;
 import java.util.stream.Collectors;
 
 @Service
@@ -46,28 +47,33 @@ public class OrganizationService {
     public void joinOrganization(Long orgId, String userEmail) {
         User user = userRepository.findByEmail(userEmail)
                 .orElseThrow(() -> new RuntimeException("Felhasználó nem található"));
-
         Organization org = organizationRepository.findById(orgId)
                 .orElseThrow(() -> new RuntimeException("Szervezet nem található"));
 
-        // Ellenőrizzük, hogy jelentkezett-e már ide (akár PENDING, akár APPROVED)
-        boolean alreadyApplied = user.getMemberships().stream()
-                .anyMatch(m -> m.getOrganization().getId().equals(orgId));
+        // Megnézzük, van-e már valamilyen tagsági kapcsolata ezzel a szervezettel
+        Optional<OrganizationMember> existingMembership = organizationMemberRepository.findByOrganizationAndUser(org, user);
 
-        if (alreadyApplied) {
-            throw new RuntimeException("Már jelentkeztél ebbe a szervezetbe, vagy már tagja vagy!");
+        if (existingMembership.isPresent()) {
+            OrganizationMember membership = existingMembership.get();
+
+            // Ha ELUTASÍTOTTÁK VAGY KILÉPETT, újrajelentkezhet:
+            if (membership.getStatus() == MembershipStatus.REJECTED || membership.getStatus() == MembershipStatus.LEFT) {
+                membership.setStatus(MembershipStatus.PENDING);
+                membership.setRole(OrganizationRole.VOLUNTEER);
+                organizationMemberRepository.save(membership);
+                return;
+            } else {
+                throw new RuntimeException("Már jelentkeztél ide, vagy már tag vagy!");
+            }
         }
 
-        // Létrehozzuk az új tagságot PENDING (Függőben) státusszal
-        OrganizationMember application = OrganizationMember.builder()
-                .user(user)
-                .organization(org)
-                .role(OrganizationRole.VOLUNTEER) // Alapból mindenki önkéntesként indul
-                .status(MembershipStatus.PENDING) // <-- EZ ITT A LÉNYEG!
-                .joinedAt(LocalDateTime.now())
-                .build();
-
-        organizationMemberRepository.save(application);
+        // HA MÉG SOHA NEM JELENTKEZETT: Új rekordot hozunk létre
+        OrganizationMember newMember = new OrganizationMember();
+        newMember.setOrganization(org);
+        newMember.setUser(user);
+        newMember.setRole(OrganizationRole.VOLUNTEER);
+        newMember.setStatus(MembershipStatus.PENDING);
+        organizationMemberRepository.save(newMember);
     }
 
     // --- ÚJ METÓDUSOK A CSAPAT KEZELÉSÉHEZ ---
@@ -113,26 +119,47 @@ public class OrganizationService {
                         null, // userAvatar
                         null, // userJoinDate
                         null,  // userOrgRole
-                        null //adminNote
+                        null, //adminNote
+                        m.getRejectionMessage()
                 )).collect(Collectors.toList());
     }
 
-    // 4. Jelentkezés elbírálása (Elfogad / Elutasít)
+    // 4. Jelentkezés elbírálása (Elfogad / Elutasít) indoklással
     @Transactional
-    public void handleApplication(Long membershipId, String status) {
+    public void handleApplication(Long membershipId, String status, String rejectionMessage) {
         OrganizationMember member = organizationMemberRepository.findById(membershipId)
                 .orElseThrow(() -> new RuntimeException("Jelentkezés nem található"));
 
         if ("APPROVED".equalsIgnoreCase(status)) {
             member.setStatus(MembershipStatus.APPROVED);
+            member.setRejectionMessage(null); // Ha korábban elutasították, de most elfogadják, töröljük az indokot
         } else if ("REJECTED".equalsIgnoreCase(status)) {
-            // Elutasítás esetén beállítjuk a REJECTED státuszt (így később nem tud újra jelentkezni próbálkozás gyanánt,
-            // de ha azt akarod, hogy újra próbálkozhasson, használhatod a organizationMemberRepository.delete(member); parancsot is).
             member.setStatus(MembershipStatus.REJECTED);
+            member.setRejectionMessage(rejectionMessage); // Elmentjük a szervező indoklását
         } else {
             throw new RuntimeException("Érvénytelen státusz: " + status);
         }
 
+        organizationMemberRepository.save(member);
+    }
+
+    // Kilépés a szervezetből (Kivéve az Alapítóknak)
+    @Transactional
+    public void leaveOrganization(Long orgId, String userEmail) {
+        User user = userRepository.findByEmail(userEmail)
+                .orElseThrow(() -> new RuntimeException("Felhasználó nem található"));
+
+        OrganizationMember member = user.getMemberships().stream()
+                .filter(m -> m.getOrganization().getId().equals(orgId))
+                .findFirst()
+                .orElseThrow(() -> new RuntimeException("Nem vagy tagja ennek a szervezetnek!"));
+
+        if (member.getRole() == OrganizationRole.OWNER) {
+            throw new RuntimeException("Alapítóként nem léphetsz ki! Kérlek, előbb ruházd át a jogkört.");
+        }
+
+        // --- SOFT DELETE: Törlés helyett csak státuszt váltunk ---
+        member.setStatus(MembershipStatus.LEFT);
         organizationMemberRepository.save(member);
     }
 }

@@ -9,6 +9,7 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.stereotype.Repository;
 
 import java.util.List;
+import java.util.Optional;
 
 @Repository
 public interface OrganizationMemberRepository extends JpaRepository<OrganizationMember, Long> {
@@ -23,4 +24,6 @@ public interface OrganizationMemberRepository extends JpaRepository<Organization
 
     // Megkeresi a vezetőnek csak a saját szervezeteihez tartozó jelentkezéseket
     List<OrganizationMember> findByStatusAndOrganizationIdIn(MembershipStatus status, List<Long> organizationIds);
+
+    Optional<OrganizationMember> findByOrganizationAndUser(Organization organization, User user);
 }

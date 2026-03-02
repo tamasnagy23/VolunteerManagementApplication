@@ -2,10 +2,11 @@ import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
     Container, Typography, Box, Paper, Button, CircularProgress,
-    Alert, Divider, Grid, Dialog, DialogTitle, DialogContent,
+    Alert, Divider, Dialog, DialogTitle, DialogContent,
     DialogActions, FormControlLabel, Checkbox, TextField,
     FormControl, InputLabel, Select, MenuItem, FormGroup, Tooltip
 } from '@mui/material';
+import Grid from '@mui/material/Grid'; // Biztonság kedvéért a friss Grid2-t használjuk
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import HowToRegIcon from '@mui/icons-material/HowToReg';
 import DeleteIcon from '@mui/icons-material/Delete';
@@ -45,9 +46,9 @@ interface UserApplication {
     id: number;
     eventId?: number;
     orgName: string;
-    // Bővítettük a típust a WITHDRAWN állapottal
     status: 'PENDING' | 'APPROVED' | 'REJECTED' | 'WITHDRAWN';
     workAreaName: string;
+    rejectionMessage?: string; // <--- ÚJ MEZŐ HOZZÁADVA
 }
 
 export default function EventDetails() {
@@ -104,7 +105,6 @@ export default function EventDetails() {
     const handleWithdraw = async (applicationId: number) => {
         if (window.confirm("Biztosan vissza szeretnéd vonni a jelentkezésedet erről a területről?")) {
             try {
-                // A DELETE mostantól nem töröl, hanem WITHDRAWN-ra állít a backenden
                 await api.delete(`/applications/${applicationId}`);
                 await checkIfApplied();
             } catch {
@@ -115,7 +115,6 @@ export default function EventDetails() {
 
     const handleReApply = async (applicationId: number) => {
         try {
-            // Visszaállítjuk PENDING státuszra
             await api.put(`/applications/${applicationId}/status`, null, { params: { status: 'PENDING' } });
             await checkIfApplied();
             alert("Sikeresen visszajelentkeztél erre a területre!");
@@ -210,64 +209,73 @@ export default function EventDetails() {
 
                     {myApplications.map((app) => (
                         <Box key={app.id} sx={{
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'space-between',
-                            mb: 1, p: 1,
+                            mb: 1.5, p: 2,
                             bgcolor: 'white',
-                            borderRadius: 1,
+                            borderRadius: 2,
                             boxShadow: '0 1px 3px rgba(0,0,0,0.1)'
                         }}>
-                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-                                <Typography sx={{ minWidth: { xs: '100px', md: '180px' }, fontWeight: 'bold' }}>
-                                    {app.workAreaName}
-                                </Typography>
-                                <Typography
-                                    variant="body2"
-                                    fontWeight="bold"
-                                    color={
-                                        app.status === 'APPROVED' ? 'success.main' :
-                                            app.status === 'REJECTED' ? 'error.main' :
-                                                app.status === 'WITHDRAWN' ? 'text.disabled' : 'text.secondary'
-                                    }
-                                >
-                                    {app.status === 'PENDING' ? '⏳ Elbírálás alatt' :
-                                        app.status === 'APPROVED' ? '✅ Elfogadva' :
-                                            app.status === 'REJECTED' ? '❌ Elutasítva' : '🏳️ Visszavonva'}
-                                </Typography>
+                            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 1 }}>
+                                <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                                    <Typography sx={{ minWidth: { xs: '100px', md: '180px' }, fontWeight: 'bold' }}>
+                                        {app.workAreaName}
+                                    </Typography>
+                                    <Typography
+                                        variant="body2"
+                                        fontWeight="bold"
+                                        color={
+                                            app.status === 'APPROVED' ? 'success.main' :
+                                                app.status === 'REJECTED' ? 'error.main' :
+                                                    app.status === 'WITHDRAWN' ? 'text.disabled' : 'text.secondary'
+                                        }
+                                    >
+                                        {app.status === 'PENDING' ? '⏳ Elbírálás alatt' :
+                                            app.status === 'APPROVED' ? '✅ Elfogadva' :
+                                                app.status === 'REJECTED' ? '❌ Elutasítva' : '🏳️ Visszavonva'}
+                                    </Typography>
+                                </Box>
+
+                                <Box>
+                                    {/* Csak akkor vonhatja vissza, ha még elbírálás alatt van vagy már elfogadták */}
+                                    {(app.status === 'PENDING' || app.status === 'APPROVED') && (
+                                        <Tooltip title="Jelentkezés visszavonása">
+                                            <Button
+                                                size="small"
+                                                color="error"
+                                                variant="outlined"
+                                                startIcon={<DeleteIcon />}
+                                                onClick={() => handleWithdraw(app.id)}
+                                            >
+                                                Visszavonás
+                                            </Button>
+                                        </Tooltip>
+                                    )}
+
+                                    {/* Ha visszavonta, lehetőséget adunk az újrajelentkezésre */}
+                                    {app.status === 'WITHDRAWN' && (
+                                        <Tooltip title="Újrajelentkezés erre a területre">
+                                            <Button
+                                                size="small"
+                                                color="primary"
+                                                variant="contained"
+                                                startIcon={<RestoreIcon />}
+                                                onClick={() => handleReApply(app.id)}
+                                            >
+                                                Visszajelentkezés
+                                            </Button>
+                                        </Tooltip>
+                                    )}
+                                </Box>
                             </Box>
 
-                            <Box>
-                                {/* Csak akkor vonhatja vissza, ha még elbírálás alatt van vagy már elfogadták */}
-                                {(app.status === 'PENDING' || app.status === 'APPROVED') && (
-                                    <Tooltip title="Jelentkezés visszavonása">
-                                        <Button
-                                            size="small"
-                                            color="error"
-                                            variant="outlined"
-                                            startIcon={<DeleteIcon />}
-                                            onClick={() => handleWithdraw(app.id)}
-                                        >
-                                            Visszavonás
-                                        </Button>
-                                    </Tooltip>
-                                )}
+                            {/* --- ÚJ: ELUTASÍTÁS INDOKLÁSA (Csak ha van) --- */}
+                            {app.status === 'REJECTED' && app.rejectionMessage && (
+                                <Box sx={{ mt: 2, p: 1.5, bgcolor: '#ffebee', borderRadius: 1, borderLeft: '4px solid #d32f2f' }}>
+                                    <Typography variant="body2" color="error.dark">
+                                        <strong>A szervező üzenete:</strong> {app.rejectionMessage}
+                                    </Typography>
+                                </Box>
+                            )}
 
-                                {/* Ha visszavonta, lehetőséget adunk az újrajelentkezésre */}
-                                {app.status === 'WITHDRAWN' && (
-                                    <Tooltip title="Újrajelentkezés erre a területre">
-                                        <Button
-                                            size="small"
-                                            color="primary"
-                                            variant="contained"
-                                            startIcon={<RestoreIcon />}
-                                            onClick={() => handleReApply(app.id)}
-                                        >
-                                            Visszajelentkezés
-                                        </Button>
-                                    </Tooltip>
-                                )}
-                            </Box>
                         </Box>
                     ))}
                 </Alert>
@@ -275,7 +283,7 @@ export default function EventDetails() {
 
             <Paper elevation={3} sx={{ p: { xs: 3, md: 5 }, borderRadius: 3 }}>
                 <Grid container spacing={4}>
-                    <Grid size={{xs:12, md:8}}  >
+                    <Grid size={{ xs: 12, md: 8 }}>
                         <Typography variant="h3" fontWeight="bold" gutterBottom color="primary">
                             {event.title}
                         </Typography>
@@ -289,7 +297,7 @@ export default function EventDetails() {
                         </Box>
                     </Grid>
 
-                    <Grid size={{xs:12, md:4}}>
+                    <Grid size={{ xs: 12, md: 4 }}>
                         <Paper variant="outlined" sx={{ p: 3, bgcolor: '#f5f5f5', borderRadius: 2 }}>
                             <Typography variant="subtitle1" fontWeight="bold">Helyszín</Typography>
                             <Typography variant="body2" mb={2}>{event.location}</Typography>
@@ -305,7 +313,6 @@ export default function EventDetails() {
                                 size="large"
                                 fullWidth
                                 startIcon={<HowToRegIcon />}
-                                // A gomb akkor tiltott, ha van bármilyen aktív (nem visszavont) jelentkezése
                                 disabled={myApplications.some(app => app.status !== 'WITHDRAWN')}
                                 onClick={() => setOpenModal(true)}
                                 sx={{ py: 1.5, fontWeight: 'bold', borderRadius: 2 }}
@@ -321,7 +328,7 @@ export default function EventDetails() {
                 <Typography variant="h5" fontWeight="bold" mb={3}>Elérhető Munkaterületek</Typography>
                 <Grid container spacing={3}>
                     {event.workAreas.map((area) => (
-                        <Grid size={{xs:12, sm:6, md:4}} key={area.id}>
+                        <Grid size={{ xs: 12, sm: 6, md: 4 }} key={area.id}>
                             <Paper variant="outlined" sx={{ p: 3, height: '100%', borderRadius: 2, borderLeft: '4px solid #1976d2' }}>
                                 <Typography variant="h6" fontWeight="bold">{area.name}</Typography>
                                 <Typography variant="body2" color="text.secondary" sx={{ mt: 1, mb: 2, minHeight: 40 }}>

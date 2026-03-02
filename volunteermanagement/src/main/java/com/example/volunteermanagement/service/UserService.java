@@ -55,7 +55,8 @@ public class UserService {
                                     m.getOrganization().getId(),
                                     m.getOrganization().getName(),
                                     m.getRole().name(),
-                                    m.getStatus().name()
+                                    m.getStatus().name(),
+                                    m.getRejectionMessage()
                             ))
                             .collect(Collectors.toList());
 
@@ -186,7 +187,8 @@ public class UserService {
                         m.getOrganization().getId(),
                         m.getOrganization().getName(),
                         m.getRole().name(),
-                        m.getStatus().name() // Itt a varázslat: átadjuk a státuszt
+                        m.getStatus().name(),
+                        m.getRejectionMessage()// Itt a varázslat: átadjuk a státuszt
                 ))
                 .collect(Collectors.toList());
 

@@ -5,6 +5,7 @@ import com.example.volunteermanagement.dto.BulkEmailRequest;
 import com.example.volunteermanagement.dto.PendingApplicationDTO;
 import com.example.volunteermanagement.model.*;
 import com.example.volunteermanagement.repository.*;
+import com.example.volunteermanagement.service.EmailService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -26,6 +27,7 @@ public class ApplicationController {
     private final UserRepository userRepository;
     private final EventRepository eventRepository;
     private final WorkAreaRepository workAreaRepository;
+    private final EmailService emailService;
 
     @PostMapping
     @PreAuthorize("isAuthenticated()")
@@ -127,6 +129,7 @@ public class ApplicationController {
     public ResponseEntity<?> updateApplicationStatus(
             @PathVariable("applicationId") Long applicationId,
             @RequestParam("status") ApplicationStatus status,
+            @RequestParam(value = "rejectionMessage", required = false) String rejectionMessage, // <-- ÚJ PARAMÉTER
             Principal principal) {
 
         User user = userRepository.findByEmail(principal.getName())
@@ -149,6 +152,7 @@ public class ApplicationController {
         if (isOwner && !isAdmin) {
             if (status == ApplicationStatus.PENDING) {
                 application.setStatus(status);
+                application.setRejectionMessage(null); // Ha visszajelentkezik, töröljük a korábbi indokot
                 applicationRepository.save(application);
                 return ResponseEntity.ok("Sikeres visszajelentkezés!");
             }
@@ -157,6 +161,11 @@ public class ApplicationController {
 
         if (isAdmin) {
             application.setStatus(status);
+            if (status == ApplicationStatus.REJECTED) {
+                application.setRejectionMessage(rejectionMessage); // Mentjük az indokot
+            } else if (status == ApplicationStatus.APPROVED) {
+                application.setRejectionMessage(null); // Töröljük, ha mégis elfogadják
+            }
             applicationRepository.save(application);
             return ResponseEntity.ok("Státusz frissítve.");
         }
@@ -171,6 +180,7 @@ public class ApplicationController {
     public ResponseEntity<?> updateBulkApplicationStatus(
             @RequestBody List<Long> applicationIds,
             @RequestParam("status") ApplicationStatus status,
+            @RequestParam(value = "rejectionMessage", required = false) String rejectionMessage,
             Principal principal) {
 
         User admin = userRepository.findByEmail(principal.getName()).orElseThrow();
@@ -275,7 +285,8 @@ public class ApplicationController {
                 null, // userAvatar (ha lesz profilkép)
                 userJoinDate,
                 userOrgRole,
-                app.getAdminNote()
+                app.getAdminNote(),
+                app.getRejectionMessage()
         );
     }
 
@@ -309,7 +320,10 @@ public class ApplicationController {
         return ResponseEntity.ok("Megjegyzés sikeresen elmentve.");
     }
 
-    // --- ÚJ: TÖMEGES ÜZENETKÜLDÉS (SZIMULÁCIÓ) ---
+    // --- ÚJ: TÖMEGES ÜZENETKÜLDÉS ---
+    // Fent, a dependenciák között deklaráld ezt is:
+    // private final EmailService emailService;
+
     @PostMapping("/bulk-email")
     @PreAuthorize("isAuthenticated()")
     public ResponseEntity<?> sendBulkEmail(
@@ -320,27 +334,23 @@ public class ApplicationController {
         boolean isGlobalAdmin = admin.getRole() == Role.SYS_ADMIN;
 
         List<Application> applications = applicationRepository.findAllById(request.applicationIds());
+        List<String> bccEmails = new ArrayList<>(); // Ide gyűjtjük az e-mail címeket
 
-        int sentCount = 0;
         for (Application app : applications) {
             boolean isOrgAdmin = admin.getMemberships().stream()
                     .anyMatch(m -> m.getOrganization().getId().equals(app.getEvent().getOrganization().getId())
                             && m.getStatus() == MembershipStatus.APPROVED
                             && (m.getRole() == OrganizationRole.ORGANIZER || m.getRole() == OrganizationRole.OWNER));
 
-            // Csak annak küldhetünk, akihez van jogunk
             if (isGlobalAdmin || isOrgAdmin) {
-                // SZIMULÁCIÓ: E-mail kiírása a konzolra
-                System.out.println("==================================================");
-                System.out.println("📩 E-MAIL KÜLDÉSE FOLYAMATBAN...");
-                System.out.println("Címzett: " + app.getUser().getName() + " (" + app.getUser().getEmail() + ")");
-                System.out.println("Tárgy: " + request.subject());
-                System.out.println("Üzenet:\n" + request.message());
-                System.out.println("==================================================\n");
-                sentCount++;
+                bccEmails.add(app.getUser().getEmail()); // Hozzáadjuk a listához
             }
         }
 
-        return ResponseEntity.ok("Sikeresen szimulálva " + sentCount + " e-mail elküldése!");
+        if (!bccEmails.isEmpty()) {
+            emailService.sendBulkEmailBcc(bccEmails, request.subject(), request.message());
+        }
+
+        return ResponseEntity.ok("E-mailek elküldve " + bccEmails.size() + " címzettnek!");
     }
 }

@@ -59,6 +59,9 @@ public class Application {
     @Column(columnDefinition = "TEXT")
     private String adminNote;
 
+    @Column(columnDefinition = "TEXT")
+    private String rejectionMessage;
+
     @PrePersist
     protected void onCreate() {
         if (this.appliedAt == null) {

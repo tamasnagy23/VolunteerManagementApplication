@@ -5,6 +5,7 @@ import com.example.volunteermanagement.dto.PendingApplicationDTO;
 import com.example.volunteermanagement.service.OrganizationService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
@@ -41,8 +42,25 @@ public class OrganizationController {
     }
 
     @PutMapping("/applications/{id}")
-    public ResponseEntity<Void> handleApplication(@PathVariable Long id, @RequestParam String status) {
-        organizationService.handleApplication(id, status);
+    public ResponseEntity<Void> handleApplication(
+            @PathVariable Long id,
+            @RequestParam String status,
+            @RequestParam(value = "rejectionMessage", required = false) String rejectionMessage // <-- 1. ÚJ PARAMÉTER
+    ) {
+        // 2. BEPASSZOLJUK A HARMADIK PARAMÉTERT IS:
+        organizationService.handleApplication(id, status, rejectionMessage);
         return ResponseEntity.ok().build();
+    }
+
+    // Kilépés végpont
+    @DeleteMapping("/{orgId}/leave")
+    @PreAuthorize("isAuthenticated()")
+    public ResponseEntity<?> leaveOrganization(@PathVariable Long orgId, Principal principal) {
+        try {
+            organizationService.leaveOrganization(orgId, principal.getName());
+            return ResponseEntity.ok("Sikeresen kiléptél a szervezetből.");
+        } catch (RuntimeException e) {
+            return ResponseEntity.badRequest().body(e.getMessage());
+        }
     }
 }
