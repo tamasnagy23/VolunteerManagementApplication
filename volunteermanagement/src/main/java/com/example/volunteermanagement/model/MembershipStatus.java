@@ -4,5 +4,6 @@ public enum MembershipStatus {
     PENDING,
     APPROVED,
     REJECTED,
-    LEFT   // <-- EZT ADD HOZZÁ
+    LEFT,
+    REMOVED// <-- EZT ADD HOZZÁ
 }

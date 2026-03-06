@@ -10,6 +10,7 @@ import {
     Group as GroupIcon
 } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
+import AccessTimeIcon from "@mui/icons-material/AccessTime";
 
 // --- INTERFÉSZEK ---
 interface Shift {
@@ -17,8 +18,6 @@ interface Shift {
     startTime: string;
     endTime: string;
     maxVolunteers: number;
-    // Feltételezzük, hogy a backend küldi a jelenlegi létszámot is,
-    // ha nem, ideiglenesen 0-val számolunk
     currentVolunteers?: number;
 }
 
@@ -63,6 +62,7 @@ export default function EventCard({ event, isLeader, canManageApplications }: Ev
                 flexDirection: 'column',
                 transition: '0.3s',
                 position: 'relative',
+                borderRadius: 3, // Kicsit modernebb, kerekebb sarkok
                 '&:hover': { boxShadow: 6, transform: 'translateY(-4px)' }
             }}
         >
@@ -71,43 +71,44 @@ export default function EventCard({ event, isLeader, canManageApplications }: Ev
                     label="BETELT"
                     color="error"
                     size="small"
-                    sx={{ position: 'absolute', top: 10, right: 10, fontWeight: 'bold', zIndex: 1 }}
+                    sx={{ position: 'absolute', top: 12, right: 12, fontWeight: 'bold', zIndex: 1, boxShadow: 2 }}
                 />
             )}
 
-            <CardContent sx={{ flexGrow: 1 }}>
+            <CardContent sx={{ flexGrow: 1, pt: 3 }}>
                 {event.organization && (
-                    <Box display="flex" alignItems="center" mb={1}>
-                        <BusinessIcon sx={{ fontSize: 16, mr: 0.5, color: 'primary.main' }} />
-                        <Typography variant="caption" fontWeight="bold" color="primary" sx={{ textTransform: 'uppercase' }}>
+                    <Box display="flex" alignItems="center" mb={1.5}>
+                        <BusinessIcon sx={{ fontSize: 18, mr: 0.5, color: 'primary.main' }} />
+                        <Typography variant="caption" fontWeight="bold" color="primary" sx={{ textTransform: 'uppercase', letterSpacing: 0.5 }}>
                             {event.organization.name}
                         </Typography>
                     </Box>
                 )}
 
-                <Typography variant="h6" component="div" gutterBottom fontWeight="bold">
+                <Typography variant="h6" component="div" gutterBottom fontWeight="900" sx={{ lineHeight: 1.2 }}>
                     {event.title}
                 </Typography>
 
-                <Box display="flex" alignItems="center" color="text.secondary" mb={1}>
+                <Box display="flex" alignItems="center" color="text.secondary" mb={2}>
                     <LocationOnIcon sx={{ fontSize: 18, mr: 0.5 }} />
                     <Typography variant="body2">{event.location}</Typography>
                 </Box>
 
                 {event.shifts && event.shifts.length > 0 && (
-                    <Box display="flex" alignItems="center" gap={1} mb={2}>
+                    <Box display="flex" alignItems="center" flexWrap="wrap" gap={1} mb={2.5}>
                         <Chip
-                            icon={<CalendarTodayIcon />}
+                            icon={<CalendarTodayIcon fontSize="small" />}
                             label={formatDate(event.shifts[0].startTime)}
                             size="small"
-                            sx={{ bgcolor: '#f0f0f0' }}
+                            sx={{ bgcolor: '#f4f6f8', fontWeight: 500 }}
                         />
                         <Chip
-                            icon={<PeopleIcon />}
+                            icon={<PeopleIcon fontSize="small" />}
                             label={`${totalMax} férőhely`}
                             size="small"
-                            variant="outlined"
+                            variant={isFull ? "filled" : "outlined"}
                             color={isFull ? "error" : "primary"}
+                            sx={{ fontWeight: 'bold' }}
                         />
                     </Box>
                 )}
@@ -121,7 +122,7 @@ export default function EventCard({ event, isLeader, canManageApplications }: Ev
                         display: '-webkit-box',
                         WebkitLineClamp: 3,
                         WebkitBoxOrient: 'vertical',
-                        mb: 2
+                        mb: 3
                     }}
                 >
                     {event.description}
@@ -131,15 +132,16 @@ export default function EventCard({ event, isLeader, canManageApplications }: Ev
                 {totalMax > 0 && (
                     <Box sx={{ mt: 'auto' }}>
                         <Box display="flex" justifyContent="space-between" mb={0.5}>
-                            <Typography variant="caption" color="text.secondary">Telítettség</Typography>
-                            <Typography variant="caption" fontWeight="bold">
+                            <Typography variant="caption" color="text.secondary" fontWeight="500">Telítettség</Typography>
+                            <Typography variant="caption" fontWeight="bold" color={isFull ? 'error.main' : 'text.primary'}>
                                 {totalCurrent} / {totalMax}
                             </Typography>
                         </Box>
                         <LinearProgress
                             variant="determinate"
                             value={Math.min((totalCurrent / totalMax) * 100, 100)}
-                            sx={{ height: 6, borderRadius: 3, bgcolor: '#eee' }}
+                            color={isFull ? "error" : "primary"}
+                            sx={{ height: 8, borderRadius: 4, bgcolor: '#edf2f7' }}
                         />
                     </Box>
                 )}
@@ -147,40 +149,65 @@ export default function EventCard({ event, isLeader, canManageApplications }: Ev
 
             <Divider />
 
-            <CardActions sx={{ p: 2, flexDirection: 'column', gap: 1 }}>
-                <Button
-                    fullWidth
-                    variant="contained"
-                    onClick={() => navigate(`/events/${event.id}`)}
-                    sx={{ borderRadius: 1.5 }}
-                >
-                    Részletek
-                </Button>
-
-                {isLeader && (
+            {/* JAVÍTOTT GOMBSOR: Eltünteti a CardActions okozta elcsúszást */}
+            <CardActions sx={{ p: 2, bgcolor: '#fbfbfb' }}>
+                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.2, width: '100%' }}>
                     <Button
-                        color="warning"
-                        variant="outlined"
                         fullWidth
-                        onClick={() => navigate(`/edit-event/${event.id}`)}
-                        sx={{ borderRadius: 1.5 }}
+                        variant="contained"
+                        onClick={() => navigate(`/events/${event.id}`)}
+                        sx={{ borderRadius: 2, py: 1, fontWeight: 'bold', textTransform: 'none', fontSize: '0.95rem' }}
                     >
-                        Szerkesztés
+                        Részletek
                     </Button>
-                )}
 
-                {canManageApplications && (
-                    <Button
-                        color="secondary"
-                        variant="text"
-                        fullWidth
-                        startIcon={<GroupIcon />}
-                        onClick={() => navigate(`/events/${event.id}/applications`)}
-                        sx={{ borderRadius: 1.5 }}
-                    >
-                        Jelentkezők
-                    </Button>
-                )}
+                    {isLeader && (
+                        <Button
+                            color="warning"
+                            variant="outlined"
+                            fullWidth
+                            onClick={() => navigate(`/edit-event/${event.id}`)}
+                            sx={{
+                                borderRadius: 2,
+                                py: 1,
+                                fontWeight: 'bold',
+                                textTransform: 'none',
+                                fontSize: '0.95rem',
+                                borderWidth: 2,
+                                '&:hover': { borderWidth: 2 }
+                            }}
+                        >
+                            Szerkesztés
+                        </Button>
+                    )}
+
+                    {/* --- ÚJ GOMB: BEOSZTÁS KEZELÉSE --- */}
+                    {canManageApplications && (
+                        <Button
+                            color="primary"
+                            variant="outlined"
+                            fullWidth
+                            startIcon={<AccessTimeIcon />} // Ne felejtsd el importálni az AccessTime ikont!
+                            onClick={() => navigate(`/events/${event.id}/shifts`)}
+                            sx={{ borderRadius: 2, py: 1, fontWeight: 'bold', textTransform: 'none', borderWidth: 2 }}
+                        >
+                            Beosztás készítése
+                        </Button>
+                    )}
+
+                    {canManageApplications && (
+                        <Button
+                            color="secondary"
+                            variant="text"
+                            fullWidth
+                            startIcon={<GroupIcon />}
+                            onClick={() => navigate(`/events/${event.id}/applications`)}
+                            sx={{ borderRadius: 2, py: 1, fontWeight: 'bold', textTransform: 'none', fontSize: '0.95rem' }}
+                        >
+                            Jelentkezők
+                        </Button>
+                    )}
+                </Box>
             </CardActions>
         </Card>
     );

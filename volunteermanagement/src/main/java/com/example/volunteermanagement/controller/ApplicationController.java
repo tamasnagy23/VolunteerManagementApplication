@@ -5,6 +5,7 @@ import com.example.volunteermanagement.dto.BulkEmailRequest;
 import com.example.volunteermanagement.dto.PendingApplicationDTO;
 import com.example.volunteermanagement.model.*;
 import com.example.volunteermanagement.repository.*;
+import com.example.volunteermanagement.service.AuditLogService;
 import com.example.volunteermanagement.service.EmailService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
@@ -28,6 +29,7 @@ public class ApplicationController {
     private final EventRepository eventRepository;
     private final WorkAreaRepository workAreaRepository;
     private final EmailService emailService;
+    private final AuditLogService auditLogService;
 
     @PostMapping
     @PreAuthorize("isAuthenticated()")
@@ -85,6 +87,16 @@ public class ApplicationController {
         }
 
         applicationRepository.saveAll(applicationsToSave);
+
+        // --- JAVÍTVA: Megadjuk a szervezet ID-ját is (5. paraméter) ---
+        auditLogService.logAction(
+                principal.getName(),
+                "EVENT_APPLICATION",
+                "Esemény ID: " + event.getId(),
+                "Sikeresen jelentkezett " + applicationsToSave.size() + " munkaterületre.",
+                event.getOrganization().getId()
+        );
+
         return ResponseEntity.ok("Sikeres jelentkezés!");
     }
 
@@ -104,7 +116,11 @@ public class ApplicationController {
     @GetMapping("/event/{eventId}")
     @Transactional(readOnly = true)
     @PreAuthorize("isAuthenticated()")
-    public ResponseEntity<?> getApplicationsByEvent(@PathVariable("eventId") Long eventId, Principal principal) {
+    public ResponseEntity<?> getApplicationsByEvent(
+            @PathVariable("eventId") Long eventId,
+            @RequestParam(value = "status", required = false) ApplicationStatus status, // <-- ÚJ: Fogadjuk a státusz szűrőt
+            Principal principal) {
+
         User user = userRepository.findByEmail(principal.getName()).orElseThrow();
         Event event = eventRepository.findById(eventId).orElseThrow(() -> new RuntimeException("Esemény nem található"));
 
@@ -118,9 +134,19 @@ public class ApplicationController {
             return ResponseEntity.status(403).body("Nincs jogosultságod a jelentkezők megtekintéséhez ezen az eseményen.");
         }
 
-        List<PendingApplicationDTO> dtos = applicationRepository.findByEventId(eventId).stream()
+        // --- ÚJ: Lekérjük mindet, de HA kaptunk státuszt a frontendről, akkor szűrünk! ---
+        List<Application> applications = applicationRepository.findByEventId(eventId);
+
+        if (status != null) {
+            applications = applications.stream()
+                    .filter(app -> app.getStatus() == status)
+                    .collect(Collectors.toList());
+        }
+
+        List<PendingApplicationDTO> dtos = applications.stream()
                 .map(this::mapToDTO)
                 .collect(Collectors.toList());
+
         return ResponseEntity.ok(dtos);
     }
 
@@ -129,7 +155,7 @@ public class ApplicationController {
     public ResponseEntity<?> updateApplicationStatus(
             @PathVariable("applicationId") Long applicationId,
             @RequestParam("status") ApplicationStatus status,
-            @RequestParam(value = "rejectionMessage", required = false) String rejectionMessage, // <-- ÚJ PARAMÉTER
+            @RequestParam(value = "rejectionMessage", required = false) String rejectionMessage,
             Principal principal) {
 
         User user = userRepository.findByEmail(principal.getName())
@@ -152,8 +178,18 @@ public class ApplicationController {
         if (isOwner && !isAdmin) {
             if (status == ApplicationStatus.PENDING) {
                 application.setStatus(status);
-                application.setRejectionMessage(null); // Ha visszajelentkezik, töröljük a korábbi indokot
+                application.setRejectionMessage(null);
                 applicationRepository.save(application);
+
+                // --- JAVÍTVA: 5 paraméter ---
+                auditLogService.logAction(
+                        principal.getName(),
+                        "APPLICATION_RESUBMIT",
+                        "Jelentkezés ID: " + applicationId,
+                        "A felhasználó újra benyújtotta a visszavont jelentkezését.",
+                        event.getOrganization().getId()
+                );
+
                 return ResponseEntity.ok("Sikeres visszajelentkezés!");
             }
             return ResponseEntity.status(403).body("Nincs jogod ehhez a művelethez!");
@@ -162,18 +198,27 @@ public class ApplicationController {
         if (isAdmin) {
             application.setStatus(status);
             if (status == ApplicationStatus.REJECTED) {
-                application.setRejectionMessage(rejectionMessage); // Mentjük az indokot
+                application.setRejectionMessage(rejectionMessage);
             } else if (status == ApplicationStatus.APPROVED) {
-                application.setRejectionMessage(null); // Töröljük, ha mégis elfogadják
+                application.setRejectionMessage(null);
             }
             applicationRepository.save(application);
+
+            // --- JAVÍTVA: 5 paraméter ---
+            auditLogService.logAction(
+                    principal.getName(),
+                    "UPDATE_APP_STATUS",
+                    "Jelentkezés ID: " + applicationId,
+                    "Új státusz: " + status.name() + (rejectionMessage != null && !rejectionMessage.isEmpty() ? " (Indoklás: " + rejectionMessage + ")" : ""),
+                    event.getOrganization().getId()
+            );
+
             return ResponseEntity.ok("Státusz frissítve.");
         }
 
         return ResponseEntity.status(403).body("Nincs jogosultságod a státusz módosításához!");
     }
 
-    // --- ÚJ: TÖMEGES STÁTUSZ MÓDOSÍTÁS ---
     @PutMapping("/bulk-status")
     @PreAuthorize("isAuthenticated()")
     @Transactional
@@ -187,6 +232,8 @@ public class ApplicationController {
         boolean isGlobalAdmin = admin.getRole() == Role.SYS_ADMIN;
 
         List<Application> applications = applicationRepository.findAllById(applicationIds);
+        int modifiedCount = 0;
+        Long firstOrgId = null;
 
         for (Application app : applications) {
             boolean isOrgAdmin = admin.getMemberships().stream()
@@ -196,16 +243,32 @@ public class ApplicationController {
 
             if (isGlobalAdmin || isOrgAdmin) {
                 app.setStatus(status);
+                modifiedCount++;
+                if (firstOrgId == null) firstOrgId = app.getEvent().getOrganization().getId();
             }
         }
 
         applicationRepository.saveAll(applications);
+
+        // --- JAVÍTVA: 5 paraméter ---
+        auditLogService.logAction(
+                principal.getName(),
+                "BULK_UPDATE_STATUS",
+                "Érintett jelentkezések: " + modifiedCount + " db",
+                "Tömeges módosítás új státuszra: " + status.name(),
+                firstOrgId // Itt az első talált szervezet ID-ját használjuk (tömeges művelet általában egy eseményen belül van)
+        );
+
         return ResponseEntity.ok("Tömeges módosítás sikeres!");
     }
 
     @DeleteMapping("/{applicationId}")
     @PreAuthorize("isAuthenticated()")
-    public ResponseEntity<?> withdrawApplication(@PathVariable("applicationId") Long applicationId, Principal principal) {
+    public ResponseEntity<?> withdrawApplication(
+            @PathVariable("applicationId") Long applicationId,
+            @RequestParam(value = "reason", required = false) String reason,
+            Principal principal) {
+
         User user = userRepository.findByEmail(principal.getName()).orElseThrow();
         Application application = applicationRepository.findById(applicationId)
                 .orElseThrow(() -> new RuntimeException("Jelentkezés nem található"));
@@ -215,12 +278,34 @@ public class ApplicationController {
         }
 
         application.setStatus(ApplicationStatus.WITHDRAWN);
+        application.setWithdrawalReason(reason);
         applicationRepository.save(application);
+
+        // --- ÚJ LOGIKA: Munkaterület nevének kinyerése a naplóhoz ---
+        String areaName = "Ismeretlen terület";
+        if (application.getAssignedWorkArea() != null) {
+            areaName = application.getAssignedWorkArea().getName();
+        } else if (application.getPreferredWorkAreas() != null && !application.getPreferredWorkAreas().isEmpty()) {
+            areaName = application.getPreferredWorkAreas().get(0).getName();
+        }
+
+        // --- NAPLÓZÁS FELOKOSÍTVA ---
+        String logDetails = "A felhasználó visszavonta a jelentkezését a(z) '" + areaName + "' területről.";
+        if (reason != null && !reason.trim().isEmpty()) {
+            logDetails += " Indok: " + reason;
+        }
+
+        auditLogService.logAction(
+                principal.getName(),
+                "WITHDRAW_APPLICATION",
+                "Terület: " + areaName, // Ezt látod majd a "Célpont" oszlopban
+                logDetails,             // Ezt látod a "Részletek" oszlopban
+                application.getEvent().getOrganization().getId()
+        );
 
         return ResponseEntity.ok("Jelentkezés visszavonva.");
     }
 
-    // --- FRISSÍTETT MAPPER VALÓDI PROFIL ADATOKKAL ---
     private PendingApplicationDTO mapToDTO(Application app) {
         String eventOrgName = app.getEvent() != null && app.getEvent().getOrganization() != null
                 ? app.getEvent().getOrganization().getName() : "Ismeretlen szervezet";
@@ -247,7 +332,6 @@ public class ApplicationController {
             }
         }
 
-        // --- ÚJ: Profiladatok kinyerése a DTO számára (JAVÍTVA) ---
         String userOrgRole = "Önkéntes";
         String userJoinDate = "-";
 
@@ -256,7 +340,6 @@ public class ApplicationController {
                     .filter(m -> m.getOrganization().getId().equals(app.getEvent().getOrganization().getId()))
                     .findFirst();
 
-            // Lambda (ifPresent) helyett hagyományos if-el ellenőrizzük, így módosíthatjuk a változókat:
             if (memberOpt.isPresent()) {
                 OrganizationMember m = memberOpt.get();
                 userOrgRole = m.getRole() == OrganizationRole.ORGANIZER ? "Szervező" :
@@ -269,28 +352,34 @@ public class ApplicationController {
             }
         }
 
+        String safePhoneNumber = app.getUser() != null ? app.getUser().getPhoneNumber() : "Nincs telefon";
+
+        if (app.getStatus() == ApplicationStatus.REJECTED || app.getStatus() == ApplicationStatus.WITHDRAWN) {
+            safePhoneNumber = "Rejtett adat (GDPR)";
+        }
+
         return new PendingApplicationDTO(
                 app.getId(),
                 app.getUser() != null ? app.getUser().getName() : "Névtelen",
                 app.getUser() != null ? app.getUser().getEmail() : "Nincs email",
-                app.getUser() != null ? app.getUser().getPhoneNumber() : "Nincs telefon",
+                safePhoneNumber,
                 eventOrgName,
                 eventOrgId,
                 displayAreaId,
                 displayAreaName,
-                app.getStatus(),
+                app.getStatus().name(),
                 eventId,
                 eventTitle,
                 answersMap,
-                null, // userAvatar (ha lesz profilkép)
+                null,
                 userJoinDate,
                 userOrgRole,
                 app.getAdminNote(),
-                app.getRejectionMessage()
+                app.getRejectionMessage(),
+                app.getWithdrawalReason()
         );
     }
 
-    // --- ÚJ: BELSŐ MEGJEGYZÉS MENTÉSE ---
     @PutMapping("/{applicationId}/note")
     @PreAuthorize("isAuthenticated()")
     @Transactional
@@ -317,12 +406,17 @@ public class ApplicationController {
         application.setAdminNote(payload.get("note"));
         applicationRepository.saveAndFlush(application);
 
+        // --- JAVÍTVA: 5 paraméter ---
+        auditLogService.logAction(
+                principal.getName(),
+                "ADMIN_NOTE_UPDATED",
+                "Jelentkezés ID: " + applicationId,
+                "A szervező belső megjegyzést módosított.",
+                event.getOrganization().getId()
+        );
+
         return ResponseEntity.ok("Megjegyzés sikeresen elmentve.");
     }
-
-    // --- ÚJ: TÖMEGES ÜZENETKÜLDÉS ---
-    // Fent, a dependenciák között deklaráld ezt is:
-    // private final EmailService emailService;
 
     @PostMapping("/bulk-email")
     @PreAuthorize("isAuthenticated()")
@@ -334,7 +428,8 @@ public class ApplicationController {
         boolean isGlobalAdmin = admin.getRole() == Role.SYS_ADMIN;
 
         List<Application> applications = applicationRepository.findAllById(request.applicationIds());
-        List<String> bccEmails = new ArrayList<>(); // Ide gyűjtjük az e-mail címeket
+        List<String> bccEmails = new ArrayList<>();
+        Long firstOrgId = null;
 
         for (Application app : applications) {
             boolean isOrgAdmin = admin.getMemberships().stream()
@@ -343,12 +438,22 @@ public class ApplicationController {
                             && (m.getRole() == OrganizationRole.ORGANIZER || m.getRole() == OrganizationRole.OWNER));
 
             if (isGlobalAdmin || isOrgAdmin) {
-                bccEmails.add(app.getUser().getEmail()); // Hozzáadjuk a listához
+                bccEmails.add(app.getUser().getEmail());
+                if (firstOrgId == null) firstOrgId = app.getEvent().getOrganization().getId();
             }
         }
 
         if (!bccEmails.isEmpty()) {
             emailService.sendBulkEmailBcc(bccEmails, request.subject(), request.message());
+
+            // --- JAVÍTVA: 5 paraméter ---
+            auditLogService.logAction(
+                    principal.getName(),
+                    "BULK_EMAIL_SENT",
+                    "Címzettek száma: " + bccEmails.size(),
+                    "Tárgy: " + request.subject(),
+                    firstOrgId
+            );
         }
 
         return ResponseEntity.ok("E-mailek elküldve " + bccEmails.size() + " címzettnek!");

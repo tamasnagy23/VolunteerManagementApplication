@@ -62,6 +62,9 @@ public class Application {
     @Column(columnDefinition = "TEXT")
     private String rejectionMessage;
 
+    @Column(columnDefinition = "TEXT")
+    private String withdrawalReason;
+
     @PrePersist
     protected void onCreate() {
         if (this.appliedAt == null) {

@@ -2,47 +2,44 @@ package com.example.volunteermanagement.service;
 
 import com.example.volunteermanagement.dto.OrganizationDTO;
 import com.example.volunteermanagement.dto.PendingApplicationDTO;
-import com.example.volunteermanagement.model.MembershipStatus;
-import com.example.volunteermanagement.model.Organization;
-import com.example.volunteermanagement.model.OrganizationMember;
-import com.example.volunteermanagement.model.OrganizationRole;
-import com.example.volunteermanagement.model.User;
+import com.example.volunteermanagement.model.*;
 import com.example.volunteermanagement.repository.OrganizationMemberRepository;
 import com.example.volunteermanagement.repository.OrganizationRepository;
 import com.example.volunteermanagement.repository.UserRepository;
-import com.example.volunteermanagement.model.ApplicationStatus;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class OrganizationService {
 
     private final OrganizationRepository organizationRepository;
     private final UserRepository userRepository;
     private final OrganizationMemberRepository organizationMemberRepository;
+    private final AuditLogService auditLogService;
 
-    // 1. Összes szervezet kilistázása a Katalógushoz
+    // 1. Összes szervezet kilistázása
     public List<OrganizationDTO> getAllOrganizations() {
         return organizationRepository.findAll().stream()
                 .map(org -> new OrganizationDTO(
                         org.getId(),
                         org.getName(),
                         org.getAddress(),
-                        org.getDescription(), // ÚJ
-                        org.getEmail(),       // ÚJ
-                        org.getPhone()        // ÚJ
+                        org.getDescription(),
+                        org.getEmail(),
+                        org.getPhone()
                 ))
                 .collect(Collectors.toList());
     }
 
-    // 2. Csatlakozás egy szervezethez (PENDING státusszal)
+    // 2. Csatlakozás (Javítva: 5 paraméteres naplózás)
     @Transactional
     public void joinOrganization(Long orgId, String userEmail) {
         User user = userRepository.findByEmail(userEmail)
@@ -50,39 +47,68 @@ public class OrganizationService {
         Organization org = organizationRepository.findById(orgId)
                 .orElseThrow(() -> new RuntimeException("Szervezet nem található"));
 
-        // Megnézzük, van-e már valamilyen tagsági kapcsolata ezzel a szervezettel
         Optional<OrganizationMember> existingMembership = organizationMemberRepository.findByOrganizationAndUser(org, user);
 
         if (existingMembership.isPresent()) {
             OrganizationMember membership = existingMembership.get();
+            if (membership.getStatus() == MembershipStatus.REJECTED ||
+                    membership.getStatus() == MembershipStatus.LEFT ||
+                    membership.getStatus() == MembershipStatus.REMOVED) {
 
-            // Ha ELUTASÍTOTTÁK VAGY KILÉPETT, újrajelentkezhet:
-            if (membership.getStatus() == MembershipStatus.REJECTED || membership.getStatus() == MembershipStatus.LEFT) {
                 membership.setStatus(MembershipStatus.PENDING);
                 membership.setRole(OrganizationRole.VOLUNTEER);
                 organizationMemberRepository.save(membership);
+
+                // Naplózás az újrajelentkezésről
+                auditLogService.logAction(userEmail, "REJOIN_ORGANIZATION", "Szervezet: " + org.getName(), "Újrajelentkezés a szervezetbe.", orgId);
                 return;
             } else {
                 throw new RuntimeException("Már jelentkeztél ide, vagy már tag vagy!");
             }
         }
 
-        // HA MÉG SOHA NEM JELENTKEZETT: Új rekordot hozunk létre
         OrganizationMember newMember = new OrganizationMember();
         newMember.setOrganization(org);
         newMember.setUser(user);
         newMember.setRole(OrganizationRole.VOLUNTEER);
         newMember.setStatus(MembershipStatus.PENDING);
         organizationMemberRepository.save(newMember);
+
+        // JAVÍTVA: 5 paraméter (orgId a végén)
+        auditLogService.logAction(
+                userEmail,
+                "JOIN_ORGANIZATION",
+                "Szervezet ID: " + orgId,
+                "A felhasználó jelentkezett a szervezetbe (Függő státusz).",
+                orgId
+        );
     }
 
-    // --- ÚJ METÓDUSOK A CSAPAT KEZELÉSÉHEZ ---
+    @Transactional
+    public void updateMemberRole(Long orgId, Long memberUserId, OrganizationRole newRole, String adminEmail) {
+        Organization org = organizationRepository.findById(orgId).orElseThrow();
+        User targetUser = userRepository.findById(memberUserId).orElseThrow();
 
-    // 3. Függőben lévő jelentkezések lekérése a vezetőnek
+        OrganizationMember member = organizationMemberRepository.findByOrganizationAndUser(org, targetUser)
+                .orElseThrow(() -> new RuntimeException("Tag nem található"));
+
+        OrganizationRole oldRole = member.getRole();
+        member.setRole(newRole);
+        organizationMemberRepository.save(member);
+
+        // NAPLÓZÁS
+        auditLogService.logAction(
+                adminEmail,
+                "ROLE_UPDATE",
+                "Felhasználó: " + targetUser.getEmail(),
+                "Szerepkör módosítva: " + oldRole + " -> " + newRole,
+                orgId
+        );
+    }
+
+    // 3. Függő jelentkezések (Maradt változatlan)
     public List<PendingApplicationDTO> getPendingApplications(String adminEmail) {
-        User admin = userRepository.findByEmail(adminEmail)
-                .orElseThrow(() -> new RuntimeException("Admin nem található"));
-
+        User admin = userRepository.findByEmail(adminEmail).orElseThrow();
         List<OrganizationMember> pending;
 
         if (admin.getRole() == com.example.volunteermanagement.model.Role.SYS_ADMIN) {
@@ -94,72 +120,121 @@ public class OrganizationService {
                     .map(m -> m.getOrganization().getId())
                     .collect(Collectors.toList());
 
-            if (myOrgIds.isEmpty()) {
-                return List.of();
-            }
-
+            if (myOrgIds.isEmpty()) return List.of();
             pending = organizationMemberRepository.findByStatusAndOrganizationIdIn(MembershipStatus.PENDING, myOrgIds);
         }
 
-        // JAVÍTOTT MAPPER a kibővített DTO-hoz
-        return pending.stream()
-                .map(m -> new PendingApplicationDTO(
-                        m.getId(),
-                        m.getUser().getName(),
-                        m.getUser().getEmail(),
-                        m.getUser().getPhoneNumber(),
-                        m.getOrganization().getName(),
-                        m.getOrganization().getId(),
-                        null,
-                        null,
-                        ApplicationStatus.valueOf(m.getStatus().name()),
-                        null,
-                        null,
-                        java.util.Collections.emptyMap(),
-                        null, // userAvatar
-                        null, // userJoinDate
-                        null,  // userOrgRole
-                        null, //adminNote
-                        m.getRejectionMessage()
-                )).collect(Collectors.toList());
+        return pending.stream().map(this::mapMembershipToDTO).collect(Collectors.toList());
     }
 
-    // 4. Jelentkezés elbírálása (Elfogad / Elutasít) indoklással
+    // 4. Elbírálás (Javítva: Adatbázis naplózás hozzáadva)
     @Transactional
-    public void handleApplication(Long membershipId, String status, String rejectionMessage) {
+    public void handleApplication(Long membershipId, String status, String rejectionMessage, String adminEmail) {
         OrganizationMember member = organizationMemberRepository.findById(membershipId)
                 .orElseThrow(() -> new RuntimeException("Jelentkezés nem található"));
 
+        Long orgId = member.getOrganization().getId();
+
         if ("APPROVED".equalsIgnoreCase(status)) {
             member.setStatus(MembershipStatus.APPROVED);
-            member.setRejectionMessage(null); // Ha korábban elutasították, de most elfogadják, töröljük az indokot
+            member.setRejectionMessage(null);
+
+            auditLogService.logAction(adminEmail, "APPROVE_MEMBERSHIP", "Tag: " + member.getUser().getEmail(), "Jelentkezés elfogadva.", orgId);
         } else if ("REJECTED".equalsIgnoreCase(status)) {
             member.setStatus(MembershipStatus.REJECTED);
-            member.setRejectionMessage(rejectionMessage); // Elmentjük a szervező indoklását
-        } else {
-            throw new RuntimeException("Érvénytelen státusz: " + status);
+            member.setRejectionMessage(rejectionMessage);
+
+            auditLogService.logAction(adminEmail, "REJECT_MEMBERSHIP", "Tag: " + member.getUser().getEmail(), "Jelentkezés elutasítva. Indok: " + rejectionMessage, orgId);
         }
 
         organizationMemberRepository.save(member);
     }
 
-    // Kilépés a szervezetből (Kivéve az Alapítóknak)
+    // 5. Kilépés (Javítva: Naplózás hozzáadva)
     @Transactional
     public void leaveOrganization(Long orgId, String userEmail) {
-        User user = userRepository.findByEmail(userEmail)
-                .orElseThrow(() -> new RuntimeException("Felhasználó nem található"));
-
+        User user = userRepository.findByEmail(userEmail).orElseThrow();
         OrganizationMember member = user.getMemberships().stream()
                 .filter(m -> m.getOrganization().getId().equals(orgId))
                 .findFirst()
                 .orElseThrow(() -> new RuntimeException("Nem vagy tagja ennek a szervezetnek!"));
 
         if (member.getRole() == OrganizationRole.OWNER) {
-            throw new RuntimeException("Alapítóként nem léphetsz ki! Kérlek, előbb ruházd át a jogkört.");
+            throw new RuntimeException("Alapítóként nem léphetsz ki!");
         }
 
-        // --- SOFT DELETE: Törlés helyett csak státuszt váltunk ---
         member.setStatus(MembershipStatus.LEFT);
         organizationMemberRepository.save(member);
+
+        auditLogService.logAction(userEmail, "LEAVE_ORGANIZATION", "Szervezet ID: " + orgId, "A felhasználó kilépett a szervezetből.", orgId);
+    }
+
+    // Tag eltávolítása (Javítva: 5 paraméteres naplózás)
+    @Transactional
+    public void removeMember(Long orgId, Long memberUserId, String requesterEmail) {
+        User requester = userRepository.findByEmail(requesterEmail).orElseThrow();
+        Organization org = organizationRepository.findById(orgId).orElseThrow();
+
+        OrganizationMember requesterMembership = organizationMemberRepository.findByOrganizationAndUser(org, requester)
+                .orElseThrow(() -> new RuntimeException("Nincs jogosultságod!"));
+
+        if (requesterMembership.getRole() == OrganizationRole.VOLUNTEER && requester.getRole() != com.example.volunteermanagement.model.Role.SYS_ADMIN) {
+            throw new RuntimeException("Nincs jogosultságod!");
+        }
+
+        User userToRemove = userRepository.findById(memberUserId).orElseThrow();
+        OrganizationMember memberToRemove = organizationMemberRepository.findByOrganizationAndUser(org, userToRemove).orElseThrow();
+
+        if (memberToRemove.getRole() == OrganizationRole.OWNER) {
+            throw new RuntimeException("Alapítót nem lehet eltávolítani!");
+        }
+
+        memberToRemove.setStatus(MembershipStatus.REMOVED);
+        organizationMemberRepository.save(memberToRemove);
+
+        // JAVÍTVA: 5 paraméter
+        auditLogService.logAction(
+                requesterEmail,
+                "REMOVE_MEMBER",
+                "Eltávolított felhasználó: " + userToRemove.getEmail(),
+                "A szervező eltávolította a tagot a szervezetből.",
+                orgId
+        );
+    }
+
+    // Segédmetódus a DTO-hoz (Kód tisztítás)
+    private PendingApplicationDTO mapMembershipToDTO(OrganizationMember m) {
+        return new PendingApplicationDTO(
+                m.getId(), m.getUser().getName(), m.getUser().getEmail(), m.getUser().getPhoneNumber(),
+                m.getOrganization().getName(), m.getOrganization().getId(), null, null,
+                m.getStatus().name(), null, null, java.util.Collections.emptyMap(),
+                null, null, null, null, m.getRejectionMessage(), null
+        );
+    }
+
+    public List<PendingApplicationDTO> getHistory(String adminEmail) {
+        User admin = userRepository.findByEmail(adminEmail).orElseThrow();
+        List<MembershipStatus> historyStatuses = List.of(MembershipStatus.LEFT, MembershipStatus.REJECTED, MembershipStatus.REMOVED);
+        List<OrganizationMember> history;
+
+        if (admin.getRole() == com.example.volunteermanagement.model.Role.SYS_ADMIN) {
+            history = organizationMemberRepository.findByStatusIn(historyStatuses);
+        } else {
+            List<Long> myOrgIds = admin.getMemberships().stream()
+                    .filter(m -> m.getStatus() == MembershipStatus.APPROVED &&
+                            (m.getRole() == OrganizationRole.OWNER || m.getRole() == OrganizationRole.ORGANIZER))
+                    .map(m -> m.getOrganization().getId())
+                    .collect(Collectors.toList());
+
+            if (myOrgIds.isEmpty()) return List.of();
+            history = organizationMemberRepository.findByStatusInAndOrganizationIdIn(historyStatuses, myOrgIds);
+        }
+
+        return history.stream().map(m -> new PendingApplicationDTO(
+                m.getId(), m.getUser().getName(), m.getUser().getEmail(), "Rejtett adat (GDPR)",
+                m.getOrganization().getName(), m.getOrganization().getId(), null, null,
+                m.getStatus().name(), null, null, java.util.Collections.emptyMap(),
+                null, null, null, null, m.getRejectionMessage(), null
+        )).collect(Collectors.toList());
     }
 }

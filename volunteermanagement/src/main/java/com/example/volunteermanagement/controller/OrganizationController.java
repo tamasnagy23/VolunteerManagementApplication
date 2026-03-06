@@ -2,6 +2,7 @@ package com.example.volunteermanagement.controller;
 
 import com.example.volunteermanagement.dto.OrganizationDTO;
 import com.example.volunteermanagement.dto.PendingApplicationDTO;
+import com.example.volunteermanagement.model.OrganizationRole;
 import com.example.volunteermanagement.service.OrganizationService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
@@ -19,21 +20,52 @@ public class OrganizationController {
 
     private final OrganizationService organizationService;
 
-    // GET /api/organizations -> Visszaadja a listát
     @GetMapping
     public ResponseEntity<List<OrganizationDTO>> getAllOrganizations() {
         return ResponseEntity.ok(organizationService.getAllOrganizations());
     }
 
-    // POST /api/organizations/1/join -> Jelentkezés az 1-es ID-jú szervezetbe
     @PostMapping("/{id}/join")
-    public ResponseEntity<String> joinOrganization(
-            @PathVariable Long id,
-            Authentication authentication
-    ) {
-        // A bejelentkezett felhasználó email címét a Spring Security-ből szedjük ki
+    public ResponseEntity<String> joinOrganization(@PathVariable Long id, Authentication authentication) {
         organizationService.joinOrganization(id, authentication.getName());
-        return ResponseEntity.ok("Sikeresen jelentkeztél a szervezetbe! Várj a jóváhagyásra.");
+        return ResponseEntity.ok("Sikeresen jelentkeztél a szervezetbe!");
+    }
+
+    @PutMapping("/{membershipId}/handle")
+    @PreAuthorize("hasAnyRole('SYS_ADMIN', 'ORGANIZER', 'OWNER')")
+    public ResponseEntity<?> handleApplication(
+            @PathVariable Long membershipId,
+            @RequestParam String status,
+            @RequestParam(required = false) String rejectionMessage,
+            Principal principal) {
+        organizationService.handleApplication(membershipId, status, rejectionMessage, principal.getName());
+        return ResponseEntity.ok("Jelentkezés állapota frissítve.");
+    }
+
+    // --- ÚJ: SZEREPKÖR MÓDOSÍTÁSA ---
+    @PutMapping("/{orgId}/members/{userId}/role")
+    @PreAuthorize("hasAnyRole('SYS_ADMIN', 'OWNER', 'ORGANIZER')")
+    public ResponseEntity<?> updateMemberRole(
+            @PathVariable Long orgId,
+            @PathVariable Long userId,
+            @RequestParam OrganizationRole role,
+            Principal principal) {
+        organizationService.updateMemberRole(orgId, userId, role, principal.getName());
+        return ResponseEntity.ok("Szerepkör sikeresen módosítva.");
+    }
+
+    @DeleteMapping("/{orgId}/leave")
+    @PreAuthorize("isAuthenticated()")
+    public ResponseEntity<?> leaveOrganization(@PathVariable Long orgId, Principal principal) {
+        organizationService.leaveOrganization(orgId, principal.getName());
+        return ResponseEntity.ok("Sikeresen kiléptél.");
+    }
+
+    @DeleteMapping("/{orgId}/members/{userId}")
+    @PreAuthorize("hasAnyRole('SYS_ADMIN', 'ORGANIZER', 'OWNER')")
+    public ResponseEntity<?> removeMember(@PathVariable Long orgId, @PathVariable Long userId, Principal principal) {
+        organizationService.removeMember(orgId, userId, principal.getName());
+        return ResponseEntity.ok("Tag eltávolítva.");
     }
 
     @GetMapping("/applications/pending")
@@ -41,26 +73,8 @@ public class OrganizationController {
         return ResponseEntity.ok(organizationService.getPendingApplications(principal.getName()));
     }
 
-    @PutMapping("/applications/{id}")
-    public ResponseEntity<Void> handleApplication(
-            @PathVariable Long id,
-            @RequestParam String status,
-            @RequestParam(value = "rejectionMessage", required = false) String rejectionMessage // <-- 1. ÚJ PARAMÉTER
-    ) {
-        // 2. BEPASSZOLJUK A HARMADIK PARAMÉTERT IS:
-        organizationService.handleApplication(id, status, rejectionMessage);
-        return ResponseEntity.ok().build();
-    }
-
-    // Kilépés végpont
-    @DeleteMapping("/{orgId}/leave")
-    @PreAuthorize("isAuthenticated()")
-    public ResponseEntity<?> leaveOrganization(@PathVariable Long orgId, Principal principal) {
-        try {
-            organizationService.leaveOrganization(orgId, principal.getName());
-            return ResponseEntity.ok("Sikeresen kiléptél a szervezetből.");
-        } catch (RuntimeException e) {
-            return ResponseEntity.badRequest().body(e.getMessage());
-        }
+    @GetMapping("/applications/history")
+    public ResponseEntity<List<PendingApplicationDTO>> getHistory(Principal principal) {
+        return ResponseEntity.ok(organizationService.getHistory(principal.getName()));
     }
 }

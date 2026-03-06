@@ -8,7 +8,8 @@ import {
     Dialog, DialogTitle, DialogContent, DialogActions, Avatar, Chip, Divider, TextField,
     useMediaQuery, useTheme, FormControlLabel
 } from '@mui/material';
-import Grid from '@mui/material/Grid'; // Nálad a Grid import így szerepelt
+import Grid from '@mui/material/Grid';
+import type { SelectChangeEvent } from '@mui/material';
 
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import DownloadIcon from '@mui/icons-material/Download';
@@ -19,10 +20,10 @@ import CancelIcon from '@mui/icons-material/Cancel';
 import VisibilityIcon from '@mui/icons-material/Visibility';
 import CloseIcon from '@mui/icons-material/Close';
 import EmailIcon from '@mui/icons-material/Email';
+import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
 import api from '../api/axios';
 import axios from 'axios';
 import * as XLSX from 'xlsx';
-import type { SelectChangeEvent } from '@mui/material';
 
 // --- INTERFÉSZEK ---
 interface Application {
@@ -38,9 +39,10 @@ interface Application {
     userOrgRole?: string;
     adminNote?: string;
     rejectionMessage?: string;
+    withdrawalReason?: string;
 }
 
-interface WorkArea { id: number; name: string; }
+interface WorkArea { id: number; name: string; capacity?: number; }
 interface EventQuestion { id: number; questionText: string; }
 interface EventData { id: number; title: string; workAreas: WorkArea[]; questions: EventQuestion[]; }
 interface GroupedApplication { userName: string; userEmail: string; userPhone: string; areas: string[]; statuses: string[]; answers: Record<string, string>; }
@@ -48,7 +50,7 @@ type SortField = 'userName' | 'workAreaName';
 type SortOrder = 'asc' | 'desc';
 
 // --- ASZTALI NÉZET: TÁBLÁZAT SOR ---
-function ApplicationRow({ app, isSelected, onSelect, onStatusChange, questions }: { app: Application, isSelected: boolean, onSelect: (id: number) => void, onStatusChange: (id: number, e: SelectChangeEvent) => void, questions: EventQuestion[] }) {
+function ApplicationRow({ app, isSelected, onSelect, onStatusChange, questions, onNoteUpdated }: { app: Application, isSelected: boolean, onSelect: (id: number) => void, onStatusChange: (id: number, e: SelectChangeEvent<string>) => void, questions: EventQuestion[], onNoteUpdated: (id: number, note: string) => void }) {
     const [open, setOpen] = useState(false);
     const [profileOpen, setProfileOpen] = useState(false);
     const [note, setNote] = useState(app.adminNote || '');
@@ -60,8 +62,12 @@ function ApplicationRow({ app, isSelected, onSelect, onStatusChange, questions }
         setSavingNote(true);
         try {
             await api.put(`/applications/${app.id}/note`, { note });
-            app.adminNote = note;
-        } catch { alert("Hiba a megjegyzés mentésekor."); } finally { setSavingNote(false); }
+            onNoteUpdated(app.id, note);
+        } catch {
+            alert("Hiba a megjegyzés mentésekor.");
+        } finally {
+            setSavingNote(false);
+        }
     };
 
     return (
@@ -70,7 +76,7 @@ function ApplicationRow({ app, isSelected, onSelect, onStatusChange, questions }
                 <TableCell padding="checkbox"><Checkbox checked={isSelected} onChange={() => onSelect(app.id)} /></TableCell>
                 <TableCell sx={{ minWidth: '100px' }}>
                     <Box display="flex" gap={1}>
-                        <IconButton size="small" onClick={() => setOpen(!open)} title="Kérdőív válaszok & Megjegyzés">
+                        <IconButton size="small" onClick={() => setOpen(!open)} title="Részletek megtekintése">
                             {open ? <KeyboardArrowUpIcon /> : <KeyboardArrowDownIcon />}
                         </IconButton>
                         <IconButton size="small" color="primary" onClick={() => setProfileOpen(true)} title="Profil megtekintése">
@@ -86,7 +92,7 @@ function ApplicationRow({ app, isSelected, onSelect, onStatusChange, questions }
                 <TableCell>{app.workAreaName}</TableCell>
                 <TableCell align="center">
                     <Select
-                        value={app.status} size="small" onChange={(e) => onStatusChange(app.id, e)}
+                        value={app.status} size="small" onChange={(e) => onStatusChange(app.id, e as SelectChangeEvent<string>)}
                         sx={{ minWidth: 150, fontWeight: 'bold', bgcolor: app.status === 'APPROVED' ? '#e8f5e9' : app.status === 'REJECTED' ? '#ffebee' : app.status === 'WITHDRAWN' ? '#f5f5f5' : 'white', color: app.status === 'WITHDRAWN' ? 'text.secondary' : 'inherit' }}
                     >
                         <MenuItem value="PENDING">⏳ Függőben</MenuItem>
@@ -101,9 +107,17 @@ function ApplicationRow({ app, isSelected, onSelect, onStatusChange, questions }
                 <TableCell style={{ paddingBottom: 0, paddingTop: 0 }} colSpan={6}>
                     <Collapse in={open} timeout="auto" unmountOnExit>
                         <Box sx={{ margin: 1, p: 2, bgcolor: '#f8fbff', borderRadius: 2, border: '1px solid #e0e0e0' }}>
+
+                            {app.status === 'WITHDRAWN' && app.withdrawalReason && (
+                                <Alert severity="warning" sx={{ mb: 2, border: '1px solid #ffcc80' }}>
+                                    <strong>Visszavonás indoka:</strong> {app.withdrawalReason}
+                                </Alert>
+                            )}
+
                             {app.status === 'REJECTED' && app.rejectionMessage && (
                                 <Alert severity="error" sx={{ mb: 2 }}><strong>Elutasítás indoka:</strong> {app.rejectionMessage}</Alert>
                             )}
+
                             <Typography variant="subtitle2" gutterBottom color="primary" fontWeight="bold">📝 Kérdőív válaszai</Typography>
                             {questions && questions.length > 0 ? (
                                 <Grid container spacing={2} sx={{ mt: 1 }}>
@@ -149,7 +163,7 @@ function ApplicationRow({ app, isSelected, onSelect, onStatusChange, questions }
 }
 
 // --- MOBILOS NÉZET: KÁRTYA ELRENDEZÉS ---
-function ApplicationCard({ app, isSelected, onSelect, onStatusChange, questions }: { app: Application, isSelected: boolean, onSelect: (id: number) => void, onStatusChange: (id: number, e: SelectChangeEvent) => void, questions: EventQuestion[] }) {
+function ApplicationCard({ app, isSelected, onSelect, onStatusChange, questions, onNoteUpdated }: { app: Application, isSelected: boolean, onSelect: (id: number) => void, onStatusChange: (id: number, e: SelectChangeEvent<string>) => void, questions: EventQuestion[], onNoteUpdated: (id: number, note: string) => void }) {
     const [open, setOpen] = useState(false);
     const [profileOpen, setProfileOpen] = useState(false);
     const [note, setNote] = useState(app.adminNote || '');
@@ -161,18 +175,18 @@ function ApplicationCard({ app, isSelected, onSelect, onStatusChange, questions 
         setSavingNote(true);
         try {
             await api.put(`/applications/${app.id}/note`, { note });
-            app.adminNote = note;
+            onNoteUpdated(app.id, note);
         } catch { alert("Hiba a megjegyzés mentésekor."); } finally { setSavingNote(false); }
     };
 
     return (
-        <Paper variant="outlined" sx={{ p: 2, mb: 2, borderRadius: 2, borderColor: isSelected ? 'primary.main' : 'divider', bgcolor: isSelected ? '#f4fafe' : 'white', boxShadow: isSelected ? '0 0 0 1px #1976d2' : 'none' }}>
+        <Paper variant="outlined" sx={{ p: 2, mb: 2, borderRadius: 3, borderColor: isSelected ? 'primary.main' : 'divider', bgcolor: isSelected ? '#f4fafe' : 'white', boxShadow: isSelected ? '0 0 0 1px #1976d2' : 'none' }}>
             <Box display="flex" justifyContent="space-between" alignItems="flex-start" mb={1}>
-                <Box display="flex" alignItems="flex-start" gap={1}>
+                <Box display="flex" alignItems="flex-start" gap={1} width="100%">
                     <Checkbox checked={isSelected} onChange={() => onSelect(app.id)} sx={{ p: 0, mt: 0.5 }} />
-                    <Box>
+                    <Box flexGrow={1}>
                         <Typography variant="subtitle1" fontWeight="bold" lineHeight={1.2}>{app.userName}</Typography>
-                        <Typography variant="body2" color="text.secondary" mt={0.5}>{app.userEmail}</Typography>
+                        <Typography variant="body2" color="text.secondary" mt={0.5} sx={{ wordBreak: 'break-all' }}>{app.userEmail}</Typography>
                     </Box>
                 </Box>
             </Box>
@@ -180,38 +194,50 @@ function ApplicationCard({ app, isSelected, onSelect, onStatusChange, questions 
                 <Typography variant="caption" color="text.secondary" display="block">📱 {app.userPhone || 'Nincs tel.'}</Typography>
                 <Chip label={app.workAreaName} size="small" color="primary" variant="outlined" sx={{ mt: 1, fontWeight: 'bold' }} />
             </Box>
-            <Box display="flex" justifyContent="space-between" alignItems="center" pl={4} mb={1}>
-                <Select value={app.status} size="small" onChange={(e) => onStatusChange(app.id, e)} sx={{ minWidth: 140, height: 32, fontSize: '0.85rem', fontWeight: 'bold', bgcolor: app.status === 'APPROVED' ? '#e8f5e9' : app.status === 'REJECTED' ? '#ffebee' : app.status === 'WITHDRAWN' ? '#f5f5f5' : 'white', color: app.status === 'WITHDRAWN' ? 'text.secondary' : 'inherit' }}>
+
+            <Box display="flex" flexDirection="column" gap={1.5} pl={4} mb={1}>
+                <Select value={app.status} size="small" fullWidth onChange={(e) => onStatusChange(app.id, e as SelectChangeEvent<string>)} sx={{ height: 36, fontSize: '0.85rem', fontWeight: 'bold', bgcolor: app.status === 'APPROVED' ? '#e8f5e9' : app.status === 'REJECTED' ? '#ffebee' : app.status === 'WITHDRAWN' ? '#f5f5f5' : 'white', color: app.status === 'WITHDRAWN' ? 'text.secondary' : 'inherit' }}>
                     <MenuItem value="PENDING">⏳ Függő</MenuItem>
                     <MenuItem value="APPROVED">✅ Elfogadva</MenuItem>
                     <MenuItem value="REJECTED">❌ Elutasítva</MenuItem>
                     <MenuItem value="WITHDRAWN" disabled={app.status !== 'WITHDRAWN'}>🏳️ Visszavont</MenuItem>
                 </Select>
+                <Box display="flex" gap={1}>
+                    <Button fullWidth size="small" variant="outlined" startIcon={open ? <KeyboardArrowUpIcon /> : <KeyboardArrowDownIcon />} onClick={() => setOpen(!open)}>Részletek</Button>
+                    <Button fullWidth size="small" variant="contained" color="primary" disableElevation startIcon={<VisibilityIcon />} onClick={() => setProfileOpen(true)}>Profil</Button>
+                </Box>
             </Box>
-            <Divider sx={{ my: 1.5 }} />
-            <Box display="flex" justifyContent="space-between" alignItems="center">
-                <Button size="small" startIcon={open ? <KeyboardArrowUpIcon /> : <KeyboardArrowDownIcon />} onClick={() => setOpen(!open)}>Részletek</Button>
-                <Button size="small" startIcon={<VisibilityIcon />} onClick={() => setProfileOpen(true)}>Profil</Button>
-            </Box>
+
             <Collapse in={open} timeout="auto" unmountOnExit>
                 <Box sx={{ mt: 2, p: 2, bgcolor: '#f8fbff', borderRadius: 2, border: '1px solid #e0e0e0' }}>
+
+                    {app.status === 'WITHDRAWN' && app.withdrawalReason && (
+                        <Box sx={{ mb: 2, p: 1.5, bgcolor: '#fff3e0', borderRadius: 1, borderLeft: '4px solid #ff9800' }}>
+                            <Typography variant="body2" color="warning.dark">
+                                <strong>Visszavonásod indoka:</strong> {app.withdrawalReason}
+                            </Typography>
+                        </Box>
+                    )}
+
                     {app.status === 'REJECTED' && app.rejectionMessage && <Alert severity="error" sx={{ mb: 2 }}><strong>Indok:</strong> {app.rejectionMessage}</Alert>}
+
                     <Typography variant="subtitle2" gutterBottom color="primary" fontWeight="bold">📝 Válaszok</Typography>
                     {questions && questions.length > 0 ? (
-                        <Box sx={{ mt: 1 }}>{questions.map((q, idx) => (<Box key={idx} mb={1}><Typography variant="caption" color="text.secondary" display="block">{q.questionText}</Typography><Typography variant="body2" fontWeight="500">{app.answers?.[q.questionText] || '- Nincs megadva -'}</Typography></Box>))}</Box>
+                        <Box sx={{ mt: 1 }}>{questions.map((q, idx) => (<Box key={idx} mb={1.5}><Typography variant="caption" color="text.secondary" display="block">{q.questionText}</Typography><Typography variant="body2" fontWeight="500">{app.answers?.[q.questionText] || '- Nincs megadva -'}</Typography></Box>))}</Box>
                     ) : ( <Typography variant="body2" color="text.secondary">Nincsenek extra kérdések.</Typography> )}
                     <Divider sx={{ my: 2 }} />
                     <Typography variant="subtitle2" gutterBottom color="secondary" fontWeight="bold">🔒 Belső megjegyzés</Typography>
-                    <TextField size="small" fullWidth multiline rows={2} value={note} onChange={(e) => setNote(e.target.value)} placeholder="Megjegyzés..." sx={{ bgcolor: 'white', mb: 1 }} />
+                    <TextField size="small" fullWidth multiline rows={2} value={note} onChange={(e) => setNote(e.target.value)} placeholder="Megjegyzés..." sx={{ bgcolor: 'white', mb: 1.5 }} />
                     <Button variant="contained" color="secondary" onClick={handleSaveNote} disabled={savingNote || note === (app.adminNote || '')} fullWidth>{savingNote ? 'Mentés...' : 'Mentés'}</Button>
                 </Box>
             </Collapse>
+
             <Dialog open={profileOpen} onClose={() => setProfileOpen(false)} maxWidth="xs" fullWidth>
                 <DialogTitle sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', bgcolor: '#f5f5f5', pb: 1.5 }}><Typography variant="h6" fontWeight="bold">Önkéntes Profil</Typography><IconButton size="small" onClick={() => setProfileOpen(false)}><CloseIcon /></IconButton></DialogTitle>
                 <DialogContent sx={{ mt: 3, display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
                     <Avatar src={app.userAvatar} sx={{ width: 90, height: 90, mb: 2, bgcolor: 'primary.main', fontSize: '2.5rem', boxShadow: '0 4px 10px rgba(0,0,0,0.1)' }}>{app.userName ? app.userName.charAt(0).toUpperCase() : '?'}</Avatar>
-                    <Typography variant="h5" fontWeight="bold">{app.userName}</Typography>
-                    <Typography variant="body2" color="text.secondary" mb={3}>{app.userEmail}</Typography>
+                    <Typography variant="h5" fontWeight="bold" align="center">{app.userName}</Typography>
+                    <Typography variant="body2" color="text.secondary" mb={3} align="center">{app.userEmail}</Typography>
                     <Box sx={{ width: '100%' }}>
                         <Divider sx={{ mb: 2 }} />
                         <Grid container spacing={2}>
@@ -231,7 +257,6 @@ function ApplicationCard({ app, isSelected, onSelect, onStatusChange, questions 
 export default function ManageApplications() {
     const { id } = useParams<{ id: string }>();
     const navigate = useNavigate();
-
     const theme = useTheme();
     const isMobile = useMediaQuery(theme.breakpoints.down('md'));
 
@@ -256,8 +281,6 @@ export default function ManageApplications() {
     const [emailSubject, setEmailSubject] = useState('');
     const [emailMessage, setEmailMessage] = useState('');
     const [sendingEmail, setSendingEmail] = useState(false);
-
-    // --- ÚJ ÁLLAPOT ---
     const [emailSuccessOpen, setEmailSuccessOpen] = useState(false);
 
     const fetchData = async () => {
@@ -283,9 +306,10 @@ export default function ManageApplications() {
 
     useEffect(() => {
         if (id) fetchData();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [id]);
 
-    const handleStatusChange = async (appId: number, eventSelect: SelectChangeEvent) => {
+    const handleStatusChange = async (appId: number, eventSelect: SelectChangeEvent<string>) => {
         const newStatus = eventSelect.target.value;
         if (newStatus === 'REJECTED') {
             setRejectTarget(appId);
@@ -296,7 +320,7 @@ export default function ManageApplications() {
         try {
             await api.put(`/applications/${appId}/status`, null, { params: { status: newStatus } });
             fetchData();
-        } catch { alert("Nem sikerült módosítani a státuszt."); }
+        } catch { alert("Hiba."); }
     };
 
     const handleBulkStatusChange = async (newStatus: string) => {
@@ -336,19 +360,20 @@ export default function ManageApplications() {
             await api.post('/applications/bulk-email', {
                 applicationIds: selectedIds, subject: emailSubject, message: emailMessage
             });
-
-            // BEZÁRJUK AZ ŰRLAPOT ÉS MEGJELENÍTJÜK A SIKER ABLAKOT
             setEmailModalOpen(false);
             setEmailSubject('');
             setEmailMessage('');
             setSelectedIds([]);
             setEmailSuccessOpen(true);
-
         } catch {
             alert("Hiba történt az üzenetek küldésekor.");
         } finally {
             setSendingEmail(false);
         }
+    };
+
+    const handleNoteUpdated = (appId: number, newNote: string) => {
+        setApplications(prev => prev.map(a => a.id === appId ? { ...a, adminNote: newNote } : a));
     };
 
     const handleSort = (field: SortField) => {
@@ -357,8 +382,17 @@ export default function ManageApplications() {
         setSortBy(field);
     };
 
+    // --- ASZTALI FÜLEK VÁLTÁSA ---
     const handleTabChange = (_e: React.SyntheticEvent, newValue: number) => {
         setCurrentTab(newValue);
+        setAreaFilter('ALL');
+        setStatusFilter('ALL');
+        setSelectedIds([]);
+    };
+
+    // --- MOBILOS LEGÖRDÜLŐ MENÜ VÁLTÁSA ---
+    const handleMobileTabChange = (event: SelectChangeEvent<number>) => {
+        setCurrentTab(Number(event.target.value));
         setAreaFilter('ALL');
         setStatusFilter('ALL');
         setSelectedIds([]);
@@ -371,8 +405,10 @@ export default function ManageApplications() {
         else if (currentTab === 2) filtered = filtered.filter(app => app.status === 'REJECTED');
         else if (currentTab === 3) filtered = filtered.filter(app => app.status === 'WITHDRAWN');
         else if (event?.workAreas) {
-            const targetAreaName = event.workAreas[currentTab - 4]?.name;
-            filtered = filtered.filter(app => app.workAreaName === targetAreaName);
+            const targetAreaName = event?.workAreas[currentTab - 4]?.name;
+            if (targetAreaName) {
+                filtered = filtered.filter(app => app.workAreaName === targetAreaName);
+            }
         }
 
         if (areaFilter !== 'ALL') filtered = filtered.filter(app => app.workAreaName === areaFilter);
@@ -387,8 +423,8 @@ export default function ManageApplications() {
         return filtered;
     }, [applications, currentTab, areaFilter, statusFilter, sortBy, sortOrder, event]);
 
-    const handleSelectAllClick = (event: React.ChangeEvent<HTMLInputElement>) => {
-        if (event.target.checked) {
+    const handleSelectAllClick = (e: React.ChangeEvent<HTMLInputElement>) => {
+        if (e.target.checked) {
             setSelectedIds(filteredAndSortedApplications.map(app => app.id));
             return;
         }
@@ -445,7 +481,7 @@ export default function ManageApplications() {
         const withdrawnData = generateSheetData(applications.filter(a => a.status === 'WITHDRAWN'));
         XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(withdrawnData), "Visszavont");
 
-        event?.workAreas.forEach(area => {
+        event?.workAreas?.forEach(area => {
             const areaData = generateSheetData(applications.filter(a => a.workAreaName === area.name));
             XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(areaData), safeSheetName(area.name));
         });
@@ -460,51 +496,140 @@ export default function ManageApplications() {
     if (loading && !rejectModalOpen) return <Box display="flex" justifyContent="center" mt={10}><CircularProgress /></Box>;
 
     return (
-        <Container maxWidth="xl" sx={{ mt: 4, mb: 10 }}>
-            <Box display="flex" flexDirection={{ xs: 'column', sm: 'row' }} justifyContent="space-between" alignItems={{ xs: 'flex-start', sm: 'center' }} gap={2} mb={4}>
+        <Container maxWidth="xl" sx={{ mt: { xs: 2, sm: 4 }, mb: 10, px: { xs: 1, sm: 2, md: 3 } }}>
+            {/* FEJLÉC */}
+            <Box display="flex" flexDirection={{ xs: 'column', sm: 'row' }} justifyContent="space-between" alignItems={{ xs: 'stretch', sm: 'center' }} gap={2} mb={3}>
                 <Box display="flex" flexDirection={{ xs: 'column', sm: 'row' }} alignItems={{ xs: 'flex-start', sm: 'center' }} gap={1}>
-                    <Button startIcon={<ArrowBackIcon />} onClick={() => navigate('/dashboard')} sx={{ mb: { xs: 1, sm: 0 }, ml: { xs: -1, sm: 0 } }}>Vissza</Button>
-                    <Typography variant="h4" sx={{ fontSize: { xs: '1.6rem', md: '2.125rem' }, fontWeight: 'bold', lineHeight: 1.2 }}>{event?.title} jelentkezői</Typography>
+                    <Button startIcon={<ArrowBackIcon />} onClick={() => navigate('/dashboard')} sx={{ alignSelf: 'flex-start' }}>Vissza</Button>
+                    <Typography variant="h5" sx={{ fontSize: { xs: '1.4rem', md: '2.125rem' }, fontWeight: 'bold', lineHeight: 1.2 }}>{event?.title}</Typography>
                 </Box>
-                <Button variant="contained" color="success" startIcon={<DownloadIcon />} onClick={exportToExcel} sx={{ whiteSpace: 'nowrap', flexShrink: 0, width: { xs: '100%', sm: 'auto' }, py: 1, mt: { xs: 1, sm: 0 } }}>Okos Excel Export (.XLSX)</Button>
+                <Button variant="contained" color="success" startIcon={<DownloadIcon />} onClick={exportToExcel} fullWidth={isMobile} sx={{ py: 1.2 }}>
+                    Excel Export
+                </Button>
             </Box>
 
             {error && <Alert severity="error" sx={{ mb: 3 }}>{error}</Alert>}
 
-            <Box sx={{ borderBottom: 1, borderColor: 'divider', mb: 3 }}>
-                <Tabs value={currentTab} onChange={handleTabChange} variant="scrollable" scrollButtons="auto">
-                    <Tab label={`⏳ Függő (${getCount(a => a.status === 'PENDING')})`} />
-                    <Tab label={`✅ Elfogadott (${getCount(a => a.status === 'APPROVED')})`} />
-                    <Tab label={`❌ Elutasított (${getCount(a => a.status === 'REJECTED')})`} />
-                    <Tab label={`🏳️ Visszavont (${getCount(a => a.status === 'WITHDRAWN')})`} />
-                    {event?.workAreas.map((area) => <Tab key={area.id} label={`📍 ${area.name} (${getCount(a => a.workAreaName === area.name)})`} />)}
-                </Tabs>
-            </Box>
+            {/* JAVÍTOTT KATEGÓRIAVÁLASZTÓ: Mobilon Select, asztalin Tab */}
+            {isMobile ? (
+                <FormControl fullWidth sx={{ mb: 3 }}>
+                    <Select
+                        value={currentTab}
+                        onChange={handleMobileTabChange}
+                        sx={{
+                            bgcolor: 'white',
+                            borderRadius: 3,
+                            fontWeight: 'bold',
+                            boxShadow: '0 2px 10px rgba(0,0,0,0.05)',
+                            '& .MuiOutlinedInput-notchedOutline': { border: 'none' }
+                        }}
+                    >
+                        <MenuItem value={0}>⏳ Függő jelentkezők ({getCount(a => a.status === 'PENDING')})</MenuItem>
+                        <MenuItem value={1}>✅ Elfogadottak ({getCount(a => a.status === 'APPROVED')})</MenuItem>
+                        <MenuItem value={2}>❌ Elutasítottak ({getCount(a => a.status === 'REJECTED')})</MenuItem>
+                        <MenuItem value={3}>🏳️ Visszavonták ({getCount(a => a.status === 'WITHDRAWN')})</MenuItem>
 
-            {selectedIds.length > 0 && (
-                <Alert severity="info" sx={{ mb: 2, display: 'flex', alignItems: 'center', bgcolor: '#e3f2fd' }}
-                       action={
-                           <Box sx={{ display: 'flex', flexDirection: { xs: 'column', sm: 'row' }, gap: 1, mt: { xs: 1, sm: 0 } }}>
-                               <Button color="primary" variant="contained" size="small" startIcon={<EmailIcon />} onClick={() => setEmailModalOpen(true)} sx={{ width: { xs: '100%', sm: 'auto' } }}>Üzenet Küldése</Button>
-                               <Button color="success" variant="contained" size="small" startIcon={<CheckCircleIcon />} onClick={() => handleBulkStatusChange('APPROVED')} sx={{ width: { xs: '100%', sm: 'auto' } }} disabled={disableApproveBtn}>Elfogadás</Button>
-                               <Button color="error" variant="contained" size="small" startIcon={<CancelIcon />} onClick={() => handleBulkStatusChange('REJECTED')} sx={{ width: { xs: '100%', sm: 'auto' } }} disabled={disableRejectBtn}>Elutasítás</Button>
-                           </Box>
-                       }
-                ><strong>{selectedIds.length}</strong> jelentkező kiválasztva.</Alert>
+                        {event?.workAreas && event.workAreas.length > 0 && <Divider key="divider" />}
+
+                        {event?.workAreas?.map((area, index) => (
+                            <MenuItem key={area.id} value={4 + index}>
+                                📍 {area.name} ({getCount(a => a.workAreaName === area.name)})
+                            </MenuItem>
+                        ))}
+                    </Select>
+                </FormControl>
+            ) : (
+                <Box sx={{ borderBottom: 1, borderColor: 'divider', mb: 3 }}>
+                    <Tabs value={currentTab} onChange={handleTabChange} variant="standard">
+                        <Tab label={`⏳ Függő (${getCount(a => a.status === 'PENDING')})`} />
+                        <Tab label={`✅ Elfogadott (${getCount(a => a.status === 'APPROVED')})`} />
+                        <Tab label={`❌ Elutasított (${getCount(a => a.status === 'REJECTED')})`} />
+                        <Tab label={`🏳️ Visszavont (${getCount(a => a.status === 'WITHDRAWN')})`} />
+                        {event?.workAreas?.map((area) => (
+                            <Tab key={area.id} label={`📍 ${area.name} (${getCount(a => a.workAreaName === area.name)})`} />
+                        ))}
+                    </Tabs>
+                </Box>
             )}
 
-            <Paper variant="outlined" sx={{ p: 2, mb: 3, bgcolor: '#fbfbfb', display: 'flex', gap: 2, alignItems: 'center', flexWrap: 'wrap' }}>
+            {/* BULK ACTIONS */}
+            {/* JAVÍTOTT BULK ACTIONS (TÖMEGES MŰVELETEK) */}
+            {selectedIds.length > 0 && (
+                <Paper
+                    elevation={0}
+                    sx={{
+                        mb: 3,
+                        p: 2,
+                        bgcolor: '#e3f2fd', // Kellemes halványkék háttér
+                        borderRadius: 3,
+                        border: '1px solid',
+                        borderColor: 'info.light',
+                    }}
+                >
+                    <Box display="flex" alignItems="center" gap={1} mb={2}>
+                        <InfoOutlinedIcon color="info" />
+                        <Typography variant="subtitle2" fontWeight="bold" color="info.dark">
+                            {selectedIds.length} jelentkező kiválasztva
+                        </Typography>
+                    </Box>
+
+                    {/* Mobilon: 1 nagy gomb fent, 2 kisebb egymás mellett lent */}
+                    <Grid container spacing={1.5}>
+                        <Grid size={{ xs: 12, sm: 4 }}>
+                            <Button
+                                fullWidth
+                                color="primary"
+                                variant="contained"
+                                startIcon={<EmailIcon />}
+                                onClick={() => setEmailModalOpen(true)}
+                                sx={{ py: 1, fontWeight: 'bold' }}
+                            >
+                                Üzenet
+                            </Button>
+                        </Grid>
+                        <Grid size={{ xs: 6, sm: 4 }}>
+                            <Button
+                                fullWidth
+                                color="success"
+                                variant="contained"
+                                startIcon={<CheckCircleIcon />}
+                                onClick={() => handleBulkStatusChange('APPROVED')}
+                                disabled={disableApproveBtn}
+                                sx={{ py: 1, fontWeight: 'bold' }}
+                            >
+                                Elfogadás
+                            </Button>
+                        </Grid>
+                        <Grid size={{ xs: 6, sm: 4 }}>
+                            <Button
+                                fullWidth
+                                color="error"
+                                variant="contained"
+                                startIcon={<CancelIcon />}
+                                onClick={() => handleBulkStatusChange('REJECTED')}
+                                disabled={disableRejectBtn}
+                                sx={{ py: 1, fontWeight: 'bold' }}
+                            >
+                                Elutasítás
+                            </Button>
+                        </Grid>
+                    </Grid>
+                </Paper>
+            )}
+
+            {/* SZŰRŐK */}
+            <Paper variant="outlined" sx={{ p: 2, mb: 3, bgcolor: '#fbfbfb', display: 'flex', flexDirection: { xs: 'column', sm: 'row' }, gap: 2, alignItems: { xs: 'stretch', sm: 'center' } }}>
                 {(currentTab <= 3) && (
-                    <FormControl size="small" sx={{ minWidth: { xs: '100%', sm: 200 } }}>
+                    <FormControl size="small" sx={{ flex: 1 }}>
                         <InputLabel>Munkaterület</InputLabel>
                         <Select value={areaFilter} label="Munkaterület" onChange={(e) => setAreaFilter(e.target.value)}>
                             <MenuItem value="ALL">Összes terület</MenuItem>
-                            {event?.workAreas.map((area) => <MenuItem key={area.id} value={area.name}>{area.name}</MenuItem>)}
+                            {event?.workAreas?.map((area) => <MenuItem key={area.id} value={area.name}>{area.name}</MenuItem>)}
                         </Select>
                     </FormControl>
                 )}
                 {currentTab > 3 && (
-                    <FormControl size="small" sx={{ minWidth: { xs: '100%', sm: 200 } }}>
+                    <FormControl size="small" sx={{ flex: 1 }}>
                         <InputLabel>Státusz szűrő</InputLabel>
                         <Select value={statusFilter} label="Státusz szűrő" onChange={(e) => setStatusFilter(e.target.value)}>
                             <MenuItem value="ALL">Összes státusz</MenuItem>
@@ -515,21 +640,22 @@ export default function ManageApplications() {
                         </Select>
                     </FormControl>
                 )}
-                <Typography variant="body2" sx={{ ml: { xs: 0, sm: 'auto' }, width: { xs: '100%', sm: 'auto' }, fontWeight: 500, textAlign: { xs: 'left', sm: 'right' } }}>Találatok: {filteredAndSortedApplications.length} fő</Typography>
+                <Typography variant="body2" sx={{ fontWeight: 500, textAlign: { xs: 'left', sm: 'right' } }}>Találatok: {filteredAndSortedApplications.length} fő</Typography>
             </Paper>
 
+            {/* LISTA / TÁBLÁZAT */}
             {filteredAndSortedApplications.length === 0 ? (
                 <Paper sx={{ p: 4, textAlign: 'center', color: 'text.secondary' }}>Nincs megjeleníthető jelentkező ezen a listán.</Paper>
             ) : isMobile ? (
                 <Box>
-                    <Box display="flex" flexDirection="column" gap={2} mb={2} p={1} bgcolor="#f5f5f5" borderRadius={2}>
+                    <Box display="flex" flexDirection="column" gap={2} mb={2} p={1.5} bgcolor="#f5f5f5" borderRadius={2}>
                         <FormControlLabel
                             control={<Checkbox indeterminate={selectedIds.length > 0 && selectedIds.length < filteredAndSortedApplications.length} checked={filteredAndSortedApplications.length > 0 && selectedIds.length === filteredAndSortedApplications.length} onChange={handleSelectAllClick} />}
                             label={<Typography variant="body2" fontWeight="bold">Összes kijelölése a listán</Typography>}
                         />
                         <FormControl size="small" fullWidth>
                             <InputLabel>Rendezés</InputLabel>
-                            <Select value={`${sortBy}-${sortOrder}`} label="Rendezés" onChange={(e) => { const [field, order] = e.target.value.split('-'); setSortBy(field as SortField); setSortOrder(order as SortOrder); }}>
+                            <Select value={`${sortBy}-${sortOrder}`} label="Rendezés" onChange={(e) => { const val = e.target.value as string; const [field, order] = val.split('-'); setSortBy(field as SortField); setSortOrder(order as SortOrder); }}>
                                 <MenuItem value="userName-asc">Név szerint (A-Z)</MenuItem>
                                 <MenuItem value="userName-desc">Név szerint (Z-A)</MenuItem>
                                 <MenuItem value="workAreaName-asc">Terület szerint (A-Z)</MenuItem>
@@ -537,7 +663,7 @@ export default function ManageApplications() {
                             </Select>
                         </FormControl>
                     </Box>
-                    {filteredAndSortedApplications.map((app) => <ApplicationCard key={app.id} app={app} isSelected={selectedIds.includes(app.id)} onSelect={handleSelectRow} onStatusChange={handleStatusChange} questions={event?.questions || []} />)}
+                    {filteredAndSortedApplications.map((app) => <ApplicationCard key={app.id} app={app} isSelected={selectedIds.includes(app.id)} onSelect={handleSelectRow} onStatusChange={handleStatusChange} questions={event?.questions || []} onNoteUpdated={handleNoteUpdated} />)}
                 </Box>
             ) : (
                 <TableContainer component={Paper} elevation={3}>
@@ -553,15 +679,16 @@ export default function ManageApplications() {
                             </TableRow>
                         </TableHead>
                         <TableBody>
-                            {filteredAndSortedApplications.map((app) => <ApplicationRow key={app.id} app={app} isSelected={selectedIds.includes(app.id)} onSelect={handleSelectRow} onStatusChange={handleStatusChange} questions={event?.questions || []} />)}
+                            {filteredAndSortedApplications.map((app) => <ApplicationRow key={app.id} app={app} isSelected={selectedIds.includes(app.id)} onSelect={handleSelectRow} onStatusChange={handleStatusChange} questions={event?.questions || []} onNoteUpdated={handleNoteUpdated}/>)}
                         </TableBody>
                     </Table>
                 </TableContainer>
             )}
 
-            <Dialog open={emailModalOpen} onClose={() => setEmailModalOpen(false)} maxWidth="sm" fullWidth>
-                <DialogTitle sx={{ bgcolor: '#1976d2', color: 'white', fontWeight: 'bold' }}>Üzenet küldése ({selectedIds.length} kijelölt személynek)</DialogTitle>
-                <DialogContent sx={{ mt: 2 }}>
+            {/* MODALOK */}
+            <Dialog open={emailModalOpen} onClose={() => setEmailModalOpen(false)} maxWidth="sm" fullWidth PaperProps={{ sx: { m: { xs: 2, sm: 3 } } }}>
+                <DialogTitle sx={{ bgcolor: '#1976d2', color: 'white', fontWeight: 'bold', fontSize: { xs: '1.1rem', sm: '1.25rem' } }}>Üzenet küldése ({selectedIds.length} főnek)</DialogTitle>
+                <DialogContent sx={{ mt: 2, p: { xs: 2, sm: 3 } }}>
                     <Typography variant="body2" color="text.secondary" mb={2}>A rendszer rejtett másolatban (BCC) küldi ki az üzeneteket, így a címzettek nem látják egymás e-mail címét.</Typography>
                     <TextField fullWidth size="small" margin="normal" label="E-mail tárgya" variant="outlined" value={emailSubject} onChange={(e) => setEmailSubject(e.target.value)} />
                     <TextField fullWidth margin="normal" label="Üzenet szövege" multiline rows={6} variant="outlined" value={emailMessage} onChange={(e) => setEmailMessage(e.target.value)} placeholder="Kedves Önkéntesek!..." />
@@ -572,9 +699,9 @@ export default function ManageApplications() {
                 </DialogActions>
             </Dialog>
 
-            <Dialog open={rejectModalOpen} onClose={() => setRejectModalOpen(false)} maxWidth="sm" fullWidth>
-                <DialogTitle sx={{ bgcolor: '#d32f2f', color: 'white', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: 1 }}><CancelIcon /> Elutasítás indoklása</DialogTitle>
-                <DialogContent sx={{ mt: 2 }}>
+            <Dialog open={rejectModalOpen} onClose={() => setRejectModalOpen(false)} maxWidth="sm" fullWidth PaperProps={{ sx: { m: { xs: 2, sm: 3 } } }}>
+                <DialogTitle sx={{ bgcolor: '#d32f2f', color: 'white', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: 1, fontSize: { xs: '1rem', sm: '1.25rem' } }}><CancelIcon /> Elutasítás indoklása</DialogTitle>
+                <DialogContent sx={{ mt: 2, p: { xs: 2, sm: 3 } }}>
                     <Typography variant="body2" color="text.secondary" mb={3}>Kérlek, add meg, hogy miért utasítod el a jelentkezőt. Ezt az üzenetet a felhasználó is látni fogja a profiljában. (A mező kitöltése opcionális, de erősen ajánlott).</Typography>
                     <TextField fullWidth autoFocus multiline rows={4} label="Elutasítás oka" variant="outlined" placeholder="Pl.: Sajnos a megjelölt munkaterületek már beteltek..." value={rejectMessage} onChange={(e) => setRejectMessage(e.target.value)} />
                 </DialogContent>
@@ -584,32 +711,14 @@ export default function ManageApplications() {
                 </DialogActions>
             </Dialog>
 
-            {/* --- ÚJ: SIKERES EMAIL KÜLDÉS MODAL --- */}
-            <Dialog
-                open={emailSuccessOpen}
-                onClose={() => setEmailSuccessOpen(false)}
-                maxWidth="xs"
-                fullWidth
-                PaperProps={{ sx: { borderRadius: 3 } }}
-            >
-                <DialogContent sx={{ textAlign: 'center', py: 5 }}>
-                    <CheckCircleIcon sx={{ fontSize: 90, color: '#2e7d32', mb: 2 }} />
-                    <Typography variant="h5" fontWeight="bold" gutterBottom color="text.primary">
-                        Sikeres küldés!
-                    </Typography>
-                    <Typography variant="body1" color="text.secondary">
-                        Az e-mailek sikeresen kézbesítve lettek a kiválasztott tagoknak.
-                    </Typography>
+            <Dialog open={emailSuccessOpen} onClose={() => setEmailSuccessOpen(false)} maxWidth="xs" fullWidth PaperProps={{ sx: { borderRadius: 3, m: { xs: 2, sm: 3 } } }}>
+                <DialogContent sx={{ textAlign: 'center', py: 4, px: 2 }}>
+                    <CheckCircleIcon sx={{ fontSize: 70, color: '#2e7d32', mb: 2 }} />
+                    <Typography variant="h5" fontWeight="bold" gutterBottom color="text.primary">Sikeres küldés!</Typography>
+                    <Typography variant="body2" color="text.secondary">Az e-mailek sikeresen kézbesítve lettek a kiválasztott tagoknak.</Typography>
                 </DialogContent>
-                <DialogActions sx={{ justifyContent: 'center', pb: 4 }}>
-                    <Button
-                        variant="contained"
-                        color="success"
-                        onClick={() => setEmailSuccessOpen(false)}
-                        sx={{ px: 4, py: 1, borderRadius: 2, fontWeight: 'bold' }}
-                    >
-                        Nagyszerű!
-                    </Button>
+                <DialogActions sx={{ justifyContent: 'center', pb: 3 }}>
+                    <Button variant="contained" color="success" onClick={() => setEmailSuccessOpen(false)} sx={{ px: 4, py: 1, borderRadius: 2, fontWeight: 'bold' }}>Nagyszerű!</Button>
                 </DialogActions>
             </Dialog>
 

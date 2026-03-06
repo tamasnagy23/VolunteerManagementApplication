@@ -9,7 +9,9 @@ import MyShifts from "./components/MyShifts.tsx";
 import MyTeam from "./components/MyTeam.tsx";
 import ManageApplications from "./components/ManageApplications.tsx";
 import Layout from './components/Layout';
-import Organizations from "./components/Organizations.tsx"; // <--- 1. ÚJ IMPORT (Ellenőrizd az elérési utat!)
+import Profile from "./components/Profile.tsx";
+import SystemLogs from "./components/SystemLogs.tsx";
+import ShiftManager from "./components/ShiftManager.tsx"; // <--- 1. ÚJ IMPORT (Ellenőrizd az elérési utat!)
 
 function App() {
     return (
@@ -26,15 +28,15 @@ function App() {
 
                     {/* Fontos: A Layout-ban '/dashboard'-ra linkeltünk, ezért itt is átírtam '/events'-ről */}
                     <Route path="/dashboard" element={<Dashboard />} />
-
-                    <Route path="/organizations" element={<Organizations />} />
-
                     <Route path="/create-event" element={<CreateEvent />} />
                     <Route path="/edit-event/:id" element={<CreateEvent />} />
                     <Route path="/events/:id" element={<EventDetails />} />
                     <Route path="/my-shifts" element={<MyShifts />} />
                     <Route path="/team" element={<MyTeam />} />
                     <Route path="/events/:id/applications" element={<ManageApplications />} />
+                    <Route path="/profile" element={<Profile />} />
+                    <Route path="/logs" element={<SystemLogs />} />
+                    <Route path="/events/:id/shifts" element={<ShiftManager />} />
                 </Route>
 
             </Routes>

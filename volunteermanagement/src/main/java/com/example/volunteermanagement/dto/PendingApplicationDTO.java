@@ -1,6 +1,5 @@
 package com.example.volunteermanagement.dto;
 
-import com.example.volunteermanagement.model.ApplicationStatus;
 import java.util.Map;
 
 public record PendingApplicationDTO(
@@ -12,15 +11,16 @@ public record PendingApplicationDTO(
         Long orgId,
         Long workAreaId,
         String workAreaName,
-        ApplicationStatus status,
+        String status,
         Long eventId,
         String eventTitle,
         Map<String, String> answers,
         String userAvatar,
         String userJoinDate,
         String userOrgRole,
-
-        // --- ÚJ MEZŐ ---
         String adminNote,
-        String rejectionMessage
+        String rejectionMessage,
+
+        // --- ÚJ MEZŐ: A visszavonás indoka ---
+        String withdrawalReason
 ) {}

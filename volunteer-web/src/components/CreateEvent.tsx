@@ -2,14 +2,16 @@ import { useEffect, useState } from 'react';
 import type { ChangeEvent, FormEvent } from 'react';
 import {
     Box, Button, TextField, Typography, Container, Paper,
-    IconButton, Divider, Alert, CircularProgress, Grid,
-    Select, MenuItem, FormControl, InputLabel, Checkbox, FormControlLabel
+    IconButton, Divider, Alert, CircularProgress,
+    Select, MenuItem, FormControl, InputLabel, Checkbox, FormControlLabel,
+    useMediaQuery, useTheme
 } from '@mui/material';
+import Grid from '@mui/material/Grid'; // Grid2 használata
 import DeleteIcon from '@mui/icons-material/Delete';
 import AddCircleOutlineIcon from '@mui/icons-material/AddCircleOutline';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import api from '../api/axios';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useNavigate, useLocation, useParams } from 'react-router-dom';
 import axios from 'axios';
 
 interface WorkAreaInput {
@@ -30,7 +32,12 @@ interface EventQuestionInput {
 export default function EventForm() {
     const { id } = useParams<{ id: string }>();
     const navigate = useNavigate();
+    const theme = useTheme();
+    const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
     const isEditMode = !!id;
+
+    const location = useLocation();
+    const passedOrgId = location.state?.selectedOrgId; // Itt kapjuk el a Dashboard-tól!
 
     const [error, setError] = useState('');
     const [loading, setLoading] = useState(false);
@@ -93,23 +100,15 @@ export default function EventForm() {
         value: string | boolean
     ) => {
         const newQuestions = [...questions];
-
-        newQuestions[index] = {
-            ...newQuestions[index],
-            [field]: value
-        } as EventQuestionInput;
-
-        if (field === 'questionType' && value === 'TEXT') {
-            newQuestions[index].options = '';
-        }
-
+        newQuestions[index] = { ...newQuestions[index], [field]: value } as EventQuestionInput;
+        if (field === 'questionType' && value === 'TEXT') newQuestions[index].options = '';
         setQuestions(newQuestions);
     };
     const addQuestion = () => setQuestions([...questions, { questionText: '', questionType: 'TEXT', options: '', isRequired: false }]);
     const removeQuestion = (index: number) => setQuestions(questions.filter((_, i) => i !== index));
 
     const handleDelete = async () => {
-        if (window.confirm('Biztosan törölni szeretnéd ezt az eseményt?')) {
+        if (window.confirm('Biztosan törölni szeretnéd ezt az eseményt? A hozzá tartozó jelentkezések is törlődnek!')) {
             try {
                 setLoading(true);
                 await api.delete(`/events/${id}`);
@@ -133,7 +132,8 @@ export default function EventForm() {
             startTime: fixDate(eventData.startTime),
             endTime: fixDate(eventData.endTime),
             workAreas: workAreas,
-            questions: questions
+            questions: questions,
+            organization: passedOrgId ? { id: passedOrgId } : null
         };
 
         try {
@@ -151,10 +151,11 @@ export default function EventForm() {
     if (initialLoading) return <Box display="flex" justifyContent="center" mt={10}><CircularProgress /></Box>;
 
     return (
-        <Container maxWidth="lg" sx={{ mt: 4, mb: 4 }}>
+        <Container maxWidth="lg" sx={{ mt: { xs: 2, md: 4 }, mb: 10 }}>
             <Button startIcon={<ArrowBackIcon />} onClick={() => navigate('/dashboard')} sx={{ mb: 2 }}>Mégse</Button>
-            <Paper elevation={3} sx={{ p: 4, borderRadius: 3 }}>
-                <Typography variant="h4" fontWeight="bold" gutterBottom>
+
+            <Paper elevation={2} sx={{ p: { xs: 2, sm: 4 }, borderRadius: 3 }}>
+                <Typography variant="h4" fontWeight="900" color="primary.main" gutterBottom sx={{ fontSize: { xs: '1.6rem', md: '2.125rem' } }}>
                     {isEditMode ? 'Esemény Szerkesztése' : 'Új Esemény Létrehozása'}
                 </Typography>
 
@@ -162,138 +163,108 @@ export default function EventForm() {
 
                 <form onSubmit={handleSubmit}>
                     {/* 1. ALAPADATOK */}
-                    <Box sx={{ mb: 5 }}>
-                        <Typography variant="h6" color="primary" sx={{ mb: 2, fontWeight: 'bold' }}>1. Alapadatok</Typography>
-                        <Grid container spacing={3}>
-                            <Grid size={{ xs: 12 }}>
+                    <Box sx={{ mb: 4 }}>
+                        <Typography variant="subtitle1" color="primary" sx={{ mb: 2, fontWeight: 'bold', textTransform: 'uppercase' }}>1. Alapadatok</Typography>
+                        <Grid container spacing={2}>
+                            <Grid size={12}>
                                 <TextField fullWidth label="Esemény címe" name="title" value={eventData.title} onChange={handleEventChange} required />
                             </Grid>
-                            <Grid size={{ xs: 12 }}>
+                            <Grid size={12}>
                                 <TextField fullWidth label="Helyszín" name="location" value={eventData.location} onChange={handleEventChange} required />
                             </Grid>
-                            <Grid size={{ xs: 12 }}>
-                                <TextField fullWidth label="Leírás" name="description" value={eventData.description} onChange={handleEventChange} multiline rows={3} required />
+                            <Grid size={12}>
+                                <TextField fullWidth label="Részletes leírás" name="description" value={eventData.description} onChange={handleEventChange} multiline rows={4} required />
                             </Grid>
                             <Grid size={{ xs: 12, sm: 6 }}>
-                                <TextField fullWidth type="datetime-local" label="Kezdés" name="startTime" value={eventData.startTime} onChange={handleEventChange} InputLabelProps={{ shrink: true }} required />
+                                <TextField fullWidth type="datetime-local" label="Kezdés Időpontja" name="startTime" value={eventData.startTime} onChange={handleEventChange} InputLabelProps={{ shrink: true }} required />
                             </Grid>
                             <Grid size={{ xs: 12, sm: 6 }}>
-                                <TextField fullWidth type="datetime-local" label="Vége" name="endTime" value={eventData.endTime} onChange={handleEventChange} InputLabelProps={{ shrink: true }} required />
+                                <TextField fullWidth type="datetime-local" label="Befejezés Időpontja" name="endTime" value={eventData.endTime} onChange={handleEventChange} InputLabelProps={{ shrink: true }} required />
                             </Grid>
                         </Grid>
                     </Box>
 
                     <Divider sx={{ mb: 4 }} />
 
-                    {/* 2. MUNKATERÜLETEK (JAVÍTOTT RESZPONZÍV GOMB) */}
-                    <Box sx={{ mb: 5 }}>
-                        <Box sx={{
-                            display: 'flex',
-                            flexDirection: { xs: 'column', sm: 'row' },
-                            justifyContent: 'space-between',
-                            alignItems: { xs: 'flex-start', sm: 'center' },
-                            gap: 2,
-                            mb: 2
-                        }}>
-                            <Typography variant="h6" color="primary" sx={{ fontWeight: 'bold' }}>2. Munkaterületek</Typography>
-                            <Button
-                                startIcon={<AddCircleOutlineIcon />}
-                                onClick={addArea}
-                                variant="outlined"
-                                size="small"
-                                sx={{
-                                    whiteSpace: 'nowrap',
-                                    flexShrink: 0,
-                                    width: { xs: '100%', sm: 'auto' }
-                                }}
-                            >
-                                Terület hozzáadása
-                            </Button>
+                    {/* 2. MUNKATERÜLETEK */}
+                    <Box sx={{ mb: 4 }}>
+                        <Box sx={{ display: 'flex', flexDirection: { xs: 'column', sm: 'row' }, justifyContent: 'space-between', alignItems: { xs: 'flex-start', sm: 'center' }, mb: 2, gap: 2 }}>
+                            <Typography variant="subtitle1" color="primary" sx={{ fontWeight: 'bold', textTransform: 'uppercase' }}>2. Munkaterületek / Beosztások</Typography>
+                            {/* Asztali nézeten itt van a gomb */}
+                            {!isMobile && (
+                                <Button startIcon={<AddCircleOutlineIcon />} onClick={addArea} variant="outlined" size="small">Terület hozzáadása</Button>
+                            )}
                         </Box>
+
                         {workAreas.map((area, index) => (
-                            <Paper key={index} variant="outlined" sx={{ p: 3, mb: 2, bgcolor: '#fcfcfc', borderRadius: 2 }}>
-                                <Grid container spacing={2} alignItems="center">
-                                    <Grid size={{ xs: 12, md: 4 }}>
-                                        <TextField label="Terület neve" fullWidth size="small" value={area.name} onChange={(e) => handleAreaChange(index, 'name', e.target.value)} required />
-                                    </Grid>
+                            <Paper key={index} variant="outlined" sx={{ p: 2, mb: 2, bgcolor: '#fcfcfc', borderRadius: 2, position: 'relative' }}>
+                                {/* Törlés gomb a jobb felső sarokban mobilon is */}
+                                <IconButton
+                                    color="error"
+                                    onClick={() => removeArea(index)}
+                                    disabled={workAreas.length === 1}
+                                    sx={{ position: 'absolute', top: 8, right: 8 }}
+                                >
+                                    <DeleteIcon />
+                                </IconButton>
+
+                                <Grid container spacing={2} sx={{ pr: 4 }}>
                                     <Grid size={{ xs: 12, md: 5 }}>
-                                        <TextField label="Leírás / Feladat" fullWidth size="small" value={area.description} onChange={(e) => handleAreaChange(index, 'description', e.target.value)} />
+                                        <TextField label="Terület neve (Pl. Jegykezelő)" fullWidth size="small" value={area.name} onChange={(e) => handleAreaChange(index, 'name', e.target.value)} required />
                                     </Grid>
-                                    <Grid size={{ xs: 10, md: 2 }}>
-                                        <TextField type="number" label="Kapacitás (fő)" fullWidth size="small" value={area.capacity} onChange={(e) => handleAreaChange(index, 'capacity', parseInt(e.target.value) || 0)} required />
+                                    <Grid size={{ xs: 12, md: 4 }}>
+                                        <TextField label="Rövid feladatleírás" fullWidth size="small" value={area.description} onChange={(e) => handleAreaChange(index, 'description', e.target.value)} />
                                     </Grid>
-                                    <Grid size={{ xs: 2, md: 1 }} sx={{ textAlign: 'right' }}>
-                                        <IconButton color="error" onClick={() => removeArea(index)} disabled={workAreas.length === 1}><DeleteIcon /></IconButton>
+                                    <Grid size={{ xs: 12, md: 3 }}>
+                                        <TextField type="number" label="Max fő" fullWidth size="small" value={area.capacity} onChange={(e) => handleAreaChange(index, 'capacity', parseInt(e.target.value) || 0)} required />
                                     </Grid>
                                 </Grid>
                             </Paper>
                         ))}
+                        {/* Mobilon alulra kerül a hozzáadás gomb */}
+                        {isMobile && (
+                            <Button fullWidth startIcon={<AddCircleOutlineIcon />} onClick={addArea} variant="outlined" sx={{ mt: 1, borderStyle: 'dashed' }}>Új Munkaterület</Button>
+                        )}
                     </Box>
 
                     <Divider sx={{ mb: 4 }} />
 
-                    {/* 3. KÉRDŐÍV KÉSZÍTŐ (JAVÍTOTT RESZPONZÍV GOMB) */}
+                    {/* 3. KÉRDŐÍV KÉSZÍTŐ */}
                     <Box sx={{ mb: 4 }}>
-                        <Box sx={{
-                            display: 'flex',
-                            flexDirection: { xs: 'column', sm: 'row' },
-                            justifyContent: 'space-between',
-                            alignItems: { xs: 'flex-start', sm: 'center' },
-                            gap: 2,
-                            mb: 3
-                        }}>
+                        <Box sx={{ display: 'flex', flexDirection: { xs: 'column', sm: 'row' }, justifyContent: 'space-between', alignItems: { xs: 'flex-start', sm: 'center' }, mb: 2, gap: 2 }}>
                             <Box>
-                                <Typography variant="h6" color="primary" sx={{ fontWeight: 'bold' }}>3. Jelentkezési Kérdőív (Opcionális)</Typography>
-                                <Typography variant="caption" color="text.secondary">Milyen extra adatokat kérsz az önkéntesektől?</Typography>
+                                <Typography variant="subtitle1" color="primary" sx={{ fontWeight: 'bold', textTransform: 'uppercase' }}>3. Jelentkezési Kérdőív (Opcionális)</Typography>
+                                <Typography variant="caption" color="text.secondary">Kérj be extra adatokat a jelentkezőktől (pl. pólóméret, ételallergia).</Typography>
                             </Box>
-                            <Button
-                                startIcon={<AddCircleOutlineIcon />}
-                                onClick={addQuestion}
-                                variant="outlined"
-                                size="small"
-                                color="secondary"
-                                sx={{
-                                    whiteSpace: 'nowrap',
-                                    flexShrink: 0,
-                                    width: { xs: '100%', sm: 'auto' }
-                                }}
-                            >
-                                Kérdés hozzáadása
-                            </Button>
+                            {!isMobile && (
+                                <Button startIcon={<AddCircleOutlineIcon />} onClick={addQuestion} variant="outlined" color="secondary" size="small">Kérdés hozzáadása</Button>
+                            )}
                         </Box>
 
-                        {questions.length === 0 && (
-                            <Typography variant="body2" color="text.secondary" sx={{ fontStyle: 'italic', textAlign: 'center', py: 2 }}>
-                                Jelenleg nincsenek egyedi kérdések. Az önkéntesek csak az alapadataikat küldik el.
-                            </Typography>
-                        )}
-
                         {questions.map((q, index) => (
-                            <Paper key={index} variant="outlined" sx={{ p: 3, mb: 2, bgcolor: '#f9fbe7', borderRadius: 2 }}>
-                                <Grid container spacing={2} alignItems="center">
+                            <Paper key={index} variant="outlined" sx={{ p: 2, mb: 2, bgcolor: '#f9fbe7', borderRadius: 2, position: 'relative' }}>
+                                <IconButton color="error" onClick={() => removeQuestion(index)} sx={{ position: 'absolute', top: 8, right: 8 }}>
+                                    <DeleteIcon />
+                                </IconButton>
+
+                                <Grid container spacing={2} sx={{ pr: 4 }}>
                                     <Grid size={{ xs: 12, md: 5 }}>
-                                        <TextField label="Kérdés szövege (pl. Pólóméret?)" fullWidth size="small" value={q.questionText} onChange={(e) => handleQuestionChange(index, 'questionText', e.target.value)} required />
+                                        <TextField label="Kérdés (Pl. Mi a pólóméreted?)" fullWidth size="small" value={q.questionText} onChange={(e) => handleQuestionChange(index, 'questionText', e.target.value)} required />
                                     </Grid>
-                                    <Grid size={{ xs: 12, md: 3 }}>
+                                    <Grid size={{ xs: 12, md: 4 }}>
                                         <FormControl fullWidth size="small">
-                                            <InputLabel>Típus</InputLabel>
-                                            <Select value={q.questionType} label="Típus" onChange={(e) => handleQuestionChange(index, 'questionType', e.target.value)}>
+                                            <InputLabel>Válasz Típusa</InputLabel>
+                                            <Select value={q.questionType} label="Válasz Típusa" onChange={(e) => handleQuestionChange(index, 'questionType', e.target.value)}>
                                                 <MenuItem value="TEXT">Szabad szöveges</MenuItem>
                                                 <MenuItem value="DROPDOWN">Legördülő lista</MenuItem>
                                                 <MenuItem value="CHECKBOX">Többválasztós (Jelölőnégyzet)</MenuItem>
                                             </Select>
                                         </FormControl>
                                     </Grid>
-                                    <Grid size={{ xs: 10, md: 3 }} sx={{ display: 'flex', alignItems: 'center' }}>
-                                        <FormControlLabel control={
-                                            <Checkbox checked={q.isRequired} onChange={(e) => handleQuestionChange(index, 'isRequired', e.target.checked)} color="primary" />
-                                        } label="Kötelező" />
-                                    </Grid>
-                                    <Grid size={{ xs: 2, md: 1 }} sx={{ textAlign: 'right' }}>
-                                        <IconButton color="error" onClick={() => removeQuestion(index)}><DeleteIcon /></IconButton>
+                                    <Grid size={{ xs: 12, md: 3 }} sx={{ display: 'flex', alignItems: 'center' }}>
+                                        <FormControlLabel control={<Checkbox checked={q.isRequired} onChange={(e) => handleQuestionChange(index, 'isRequired', e.target.checked)} color="primary" />} label="Kötelező kitölteni" />
                                     </Grid>
 
-                                    {/* Opciók megadása, ha nem TEXT típusú */}
                                     {q.questionType !== 'TEXT' && (
                                         <Grid size={{ xs: 12 }} sx={{ mt: 1 }}>
                                             <TextField
@@ -310,14 +281,20 @@ export default function EventForm() {
                                 </Grid>
                             </Paper>
                         ))}
+                        {isMobile && (
+                            <Button fullWidth color="secondary" startIcon={<AddCircleOutlineIcon />} onClick={addQuestion} variant="outlined" sx={{ mt: 1, borderStyle: 'dashed' }}>Új Kérdés</Button>
+                        )}
                     </Box>
 
-                    <Box sx={{ display: 'flex', gap: 2, mt: 6 }}>
-                        <Button type="submit" variant="contained" size="large" disabled={loading} sx={{ flexGrow: 2, py: 1.5, fontWeight: 'bold', borderRadius: 2 }}>
+                    {/* BEKÜLDÉS GOMBOK */}
+                    <Box sx={{ display: 'flex', flexDirection: { xs: 'column', sm: 'row' }, gap: 2, mt: 5 }}>
+                        <Button type="submit" variant="contained" size="large" disabled={loading} sx={{ flexGrow: 1, py: 1.5, fontWeight: 'bold', borderRadius: 2 }}>
                             {loading ? 'Folyamatban...' : isEditMode ? 'Változtatások Mentése' : 'Esemény Publikálása'}
                         </Button>
                         {isEditMode && (
-                            <Button variant="outlined" color="error" size="large" onClick={handleDelete} disabled={loading} sx={{ borderRadius: 2, px: 4 }}>Törlés</Button>
+                            <Button variant="outlined" color="error" size="large" onClick={handleDelete} disabled={loading} sx={{ borderRadius: 2, py: 1.5 }}>
+                                Esemény Törlése
+                            </Button>
                         )}
                     </Box>
                 </form>

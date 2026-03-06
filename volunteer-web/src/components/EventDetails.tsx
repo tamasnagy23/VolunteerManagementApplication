@@ -4,9 +4,10 @@ import {
     Container, Typography, Box, Paper, Button, CircularProgress,
     Alert, Divider, Dialog, DialogTitle, DialogContent,
     DialogActions, FormControlLabel, Checkbox, TextField,
-    FormControl, InputLabel, Select, MenuItem, FormGroup, Tooltip
+    FormControl, InputLabel, Select, MenuItem, FormGroup,
+    useMediaQuery, useTheme, Chip
 } from '@mui/material';
-import Grid from '@mui/material/Grid'; // Biztonság kedvéért a friss Grid2-t használjuk
+import Grid from '@mui/material/Grid'; // Grid2 importálva
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import HowToRegIcon from '@mui/icons-material/HowToReg';
 import DeleteIcon from '@mui/icons-material/Delete';
@@ -48,12 +49,14 @@ interface UserApplication {
     orgName: string;
     status: 'PENDING' | 'APPROVED' | 'REJECTED' | 'WITHDRAWN';
     workAreaName: string;
-    rejectionMessage?: string; // <--- ÚJ MEZŐ HOZZÁADVA
+    rejectionMessage?: string;
 }
 
 export default function EventDetails() {
     const { id } = useParams<{ id: string }>();
     const navigate = useNavigate();
+    const theme = useTheme();
+    const isMobile = useMediaQuery(theme.breakpoints.down('sm')); // Reszponzív breakpoint
 
     const [event, setEvent] = useState<EventData | null>(null);
     const [loading, setLoading] = useState<boolean>(true);
@@ -64,6 +67,11 @@ export default function EventDetails() {
     const [submitting, setSubmitting] = useState(false);
     const [selectedWorkAreas, setSelectedWorkAreas] = useState<number[]>([]);
     const [answers, setAnswers] = useState<Record<number, string | string[]>>({});
+
+    const [withdrawModalOpen, setWithdrawModalOpen] = useState(false);
+    const [withdrawAppId, setWithdrawAppId] = useState<number | null>(null);
+    const [withdrawReason, setWithdrawReason] = useState('');
+    const [withdrawing, setWithdrawing] = useState(false);
 
     useEffect(() => {
         if (id) {
@@ -102,14 +110,25 @@ export default function EventDetails() {
         }
     };
 
-    const handleWithdraw = async (applicationId: number) => {
-        if (window.confirm("Biztosan vissza szeretnéd vonni a jelentkezésedet erről a területről?")) {
-            try {
-                await api.delete(`/applications/${applicationId}`);
-                await checkIfApplied();
-            } catch {
-                alert("Nem sikerült visszavonni a jelentkezést.");
-            }
+    const handleWithdrawClick = (applicationId: number) => {
+        setWithdrawAppId(applicationId);
+        setWithdrawReason('');
+        setWithdrawModalOpen(true);
+    };
+
+    const confirmWithdraw = async () => {
+        if (!withdrawAppId) return;
+        setWithdrawing(true);
+        try {
+            await api.delete(`/applications/${withdrawAppId}`, {
+                params: { reason: withdrawReason.trim() || undefined }
+            });
+            setWithdrawModalOpen(false);
+            await checkIfApplied();
+        } catch {
+            alert("Nem sikerült visszavonni a jelentkezést.");
+        } finally {
+            setWithdrawing(false);
         }
     };
 
@@ -125,7 +144,7 @@ export default function EventDetails() {
 
     const handleWorkAreaToggle = (areaId: number) => {
         setSelectedWorkAreas(prev =>
-            prev.includes(areaId) ? prev.filter(id => id !== areaId) : [...prev, areaId]
+            prev.includes(areaId) ? prev.filter(aId => aId !== areaId) : [...prev, areaId]
         );
     };
 
@@ -191,19 +210,20 @@ export default function EventDetails() {
     if (!event) return <Container><Alert severity="error">Esemény nem található.</Alert></Container>;
 
     return (
-        <Container maxWidth="lg" sx={{ mt: 4, mb: 10 }}>
-            <Button startIcon={<ArrowBackIcon />} onClick={() => navigate('/dashboard')} sx={{ mb: 3 }}>
+        <Container maxWidth="lg" sx={{ mt: { xs: 2, md: 4 }, mb: 10 }}>
+            <Button startIcon={<ArrowBackIcon />} onClick={() => navigate('/dashboard')} sx={{ mb: 2 }}>
                 Vissza a listához
             </Button>
 
             {error && <Alert severity="error" sx={{ mb: 3 }}>{error}</Alert>}
 
+            {/* JELENTKEZÉSEID ÁLLAPOTA (JAVÍTOTT RESZPONZIVITÁS) */}
             {myApplications.length > 0 && (
                 <Alert
                     severity="info"
-                    sx={{ mb: 4, borderRadius: 2, border: '1px solid', borderColor: 'divider', bgcolor: '#f8fbff' }}
+                    sx={{ mb: 4, borderRadius: 3, border: '1px solid', borderColor: 'info.light', bgcolor: '#f8fbff' }}
                 >
-                    <Typography variant="subtitle1" fontWeight="bold" mb={2} color="primary">
+                    <Typography variant="subtitle1" fontWeight="bold" mb={2} color="info.dark">
                         Jelentkezéseid állapota:
                     </Typography>
 
@@ -212,101 +232,99 @@ export default function EventDetails() {
                             mb: 1.5, p: 2,
                             bgcolor: 'white',
                             borderRadius: 2,
-                            boxShadow: '0 1px 3px rgba(0,0,0,0.1)'
+                            boxShadow: '0 2px 5px rgba(0,0,0,0.05)',
+                            display: 'flex',
+                            flexDirection: { xs: 'column', sm: 'row' }, // Mobilon egymás alá
+                            alignItems: { xs: 'flex-start', sm: 'center' },
+                            justifyContent: 'space-between',
+                            gap: 2
                         }}>
-                            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 1 }}>
-                                <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-                                    <Typography sx={{ minWidth: { xs: '100px', md: '180px' }, fontWeight: 'bold' }}>
-                                        {app.workAreaName}
-                                    </Typography>
-                                    <Typography
-                                        variant="body2"
-                                        fontWeight="bold"
-                                        color={
-                                            app.status === 'APPROVED' ? 'success.main' :
-                                                app.status === 'REJECTED' ? 'error.main' :
-                                                    app.status === 'WITHDRAWN' ? 'text.disabled' : 'text.secondary'
-                                        }
-                                    >
-                                        {app.status === 'PENDING' ? '⏳ Elbírálás alatt' :
-                                            app.status === 'APPROVED' ? '✅ Elfogadva' :
-                                                app.status === 'REJECTED' ? '❌ Elutasítva' : '🏳️ Visszavonva'}
-                                    </Typography>
-                                </Box>
-
-                                <Box>
-                                    {/* Csak akkor vonhatja vissza, ha még elbírálás alatt van vagy már elfogadták */}
-                                    {(app.status === 'PENDING' || app.status === 'APPROVED') && (
-                                        <Tooltip title="Jelentkezés visszavonása">
-                                            <Button
-                                                size="small"
-                                                color="error"
-                                                variant="outlined"
-                                                startIcon={<DeleteIcon />}
-                                                onClick={() => handleWithdraw(app.id)}
-                                            >
-                                                Visszavonás
-                                            </Button>
-                                        </Tooltip>
-                                    )}
-
-                                    {/* Ha visszavonta, lehetőséget adunk az újrajelentkezésre */}
-                                    {app.status === 'WITHDRAWN' && (
-                                        <Tooltip title="Újrajelentkezés erre a területre">
-                                            <Button
-                                                size="small"
-                                                color="primary"
-                                                variant="contained"
-                                                startIcon={<RestoreIcon />}
-                                                onClick={() => handleReApply(app.id)}
-                                            >
-                                                Visszajelentkezés
-                                            </Button>
-                                        </Tooltip>
-                                    )}
-                                </Box>
+                            <Box>
+                                <Typography sx={{ fontWeight: 'bold', fontSize: '1.1rem' }}>
+                                    {app.workAreaName}
+                                </Typography>
+                                <Typography
+                                    variant="body2"
+                                    fontWeight="bold"
+                                    sx={{ mt: 0.5 }}
+                                    color={
+                                        app.status === 'APPROVED' ? 'success.main' :
+                                            app.status === 'REJECTED' ? 'error.main' :
+                                                app.status === 'WITHDRAWN' ? 'text.disabled' : 'warning.dark'
+                                    }
+                                >
+                                    {app.status === 'PENDING' ? '⏳ Elbírálás alatt' :
+                                        app.status === 'APPROVED' ? '✅ Elfogadva' :
+                                            app.status === 'REJECTED' ? '❌ Elutasítva' : '🏳️ Visszavonva'}
+                                </Typography>
                             </Box>
 
-                            {/* --- ÚJ: ELUTASÍTÁS INDOKLÁSA (Csak ha van) --- */}
+                            <Box sx={{ width: { xs: '100%', sm: 'auto' } }}>
+                                {(app.status === 'PENDING' || app.status === 'APPROVED') && (
+                                    <Button
+                                        fullWidth={isMobile}
+                                        size="small"
+                                        color="error"
+                                        variant="outlined"
+                                        startIcon={<DeleteIcon />}
+                                        onClick={() => handleWithdrawClick(app.id)}
+                                    >
+                                        Visszavonás
+                                    </Button>
+                                )}
+
+                                {app.status === 'WITHDRAWN' && (
+                                    <Button
+                                        fullWidth={isMobile}
+                                        size="small"
+                                        color="primary"
+                                        variant="contained"
+                                        startIcon={<RestoreIcon />}
+                                        onClick={() => handleReApply(app.id)}
+                                    >
+                                        Visszajelentkezés
+                                    </Button>
+                                )}
+                            </Box>
+
                             {app.status === 'REJECTED' && app.rejectionMessage && (
-                                <Box sx={{ mt: 2, p: 1.5, bgcolor: '#ffebee', borderRadius: 1, borderLeft: '4px solid #d32f2f' }}>
+                                <Box sx={{ width: '100%', mt: 1, p: 1.5, bgcolor: '#ffebee', borderRadius: 1, borderLeft: '4px solid #d32f2f' }}>
                                     <Typography variant="body2" color="error.dark">
-                                        <strong>A szervező üzenete:</strong> {app.rejectionMessage}
+                                        <strong>Szervező üzenete:</strong> {app.rejectionMessage}
                                     </Typography>
                                 </Box>
                             )}
-
                         </Box>
                     ))}
                 </Alert>
             )}
 
-            <Paper elevation={3} sx={{ p: { xs: 3, md: 5 }, borderRadius: 3 }}>
+            <Paper elevation={2} sx={{ p: { xs: 2, sm: 4, md: 5 }, borderRadius: 3 }}>
                 <Grid container spacing={4}>
                     <Grid size={{ xs: 12, md: 8 }}>
-                        <Typography variant="h3" fontWeight="bold" gutterBottom color="primary">
+                        <Typography variant="h4" sx={{ fontSize: { xs: '1.8rem', md: '2.5rem' }, fontWeight: '900', color: 'primary.main', mb: 1 }}>
                             {event.title}
                         </Typography>
-                        <Typography variant="h6" color="text.secondary" gutterBottom>
+                        <Typography variant="subtitle1" color="text.secondary" gutterBottom sx={{ fontWeight: 'bold' }}>
                             Szervező: {event.organization.name}
                         </Typography>
                         <Box mt={4}>
-                            <Typography variant="body1" sx={{ whiteSpace: 'pre-wrap', fontSize: '1.1rem' }}>
+                            <Typography variant="body1" sx={{ whiteSpace: 'pre-wrap', fontSize: '1.05rem', lineHeight: 1.7 }}>
                                 {event.description}
                             </Typography>
                         </Box>
                     </Grid>
 
                     <Grid size={{ xs: 12, md: 4 }}>
-                        <Paper variant="outlined" sx={{ p: 3, bgcolor: '#f5f5f5', borderRadius: 2 }}>
-                            <Typography variant="subtitle1" fontWeight="bold">Helyszín</Typography>
-                            <Typography variant="body2" mb={2}>{event.location}</Typography>
+                        <Paper variant="outlined" sx={{ p: 3, bgcolor: '#f8fafc', borderRadius: 3, border: '1px solid #e2e8f0' }}>
+                            <Typography variant="subtitle2" color="primary" fontWeight="bold" textTransform="uppercase">Helyszín</Typography>
+                            <Typography variant="body1" mb={2} fontWeight="500">{event.location}</Typography>
 
-                            <Typography variant="subtitle1" fontWeight="bold">Kezdés</Typography>
-                            <Typography variant="body2" mb={2}>{new Date(event.startTime).toLocaleString('hu-HU')}</Typography>
+                            <Typography variant="subtitle2" color="primary" fontWeight="bold" textTransform="uppercase">Kezdés</Typography>
+                            <Typography variant="body1" mb={2} fontWeight="500">{new Date(event.startTime).toLocaleString('hu-HU')}</Typography>
 
-                            <Typography variant="subtitle1" fontWeight="bold">Befejezés</Typography>
-                            <Typography variant="body2" mb={3}>{new Date(event.endTime).toLocaleString('hu-HU')}</Typography>
+                            <Typography variant="subtitle2" color="primary" fontWeight="bold" textTransform="uppercase">Befejezés</Typography>
+                            <Typography variant="body1" mb={3} fontWeight="500">{new Date(event.endTime).toLocaleString('hu-HU')}</Typography>
 
                             <Button
                                 variant="contained"
@@ -317,7 +335,7 @@ export default function EventDetails() {
                                 onClick={() => setOpenModal(true)}
                                 sx={{ py: 1.5, fontWeight: 'bold', borderRadius: 2 }}
                             >
-                                {myApplications.some(app => app.status !== 'WITHDRAWN') ? "Jelentkezés leadva" : "Jelentkezem az Eseményre"}
+                                {myApplications.some(app => app.status !== 'WITHDRAWN') ? "Jelentkezés leadva" : "Jelentkezem!"}
                             </Button>
                         </Paper>
                     </Grid>
@@ -329,31 +347,30 @@ export default function EventDetails() {
                 <Grid container spacing={3}>
                     {event.workAreas.map((area) => (
                         <Grid size={{ xs: 12, sm: 6, md: 4 }} key={area.id}>
-                            <Paper variant="outlined" sx={{ p: 3, height: '100%', borderRadius: 2, borderLeft: '4px solid #1976d2' }}>
+                            <Paper variant="outlined" sx={{ p: 3, height: '100%', borderRadius: 3, borderLeft: '4px solid #1976d2', display: 'flex', flexDirection: 'column' }}>
                                 <Typography variant="h6" fontWeight="bold">{area.name}</Typography>
-                                <Typography variant="body2" color="text.secondary" sx={{ mt: 1, mb: 2, minHeight: 40 }}>
-                                    {area.description || "Nincs megadva leírás."}
+                                <Typography variant="body2" color="text.secondary" sx={{ mt: 1, mb: 2, flexGrow: 1 }}>
+                                    {area.description || "Nincs megadva részletes leírás."}
                                 </Typography>
-                                <Typography variant="caption" fontWeight="bold" color="primary">
-                                    Kapacitás: {area.capacity} fő
-                                </Typography>
+                                <Chip label={`Kapacitás: ${area.capacity} fő`} size="small" color="primary" variant="outlined" sx={{ fontWeight: 'bold', alignSelf: 'flex-start' }} />
                             </Paper>
                         </Grid>
                     ))}
                 </Grid>
             </Paper>
 
-            <Dialog open={openModal} onClose={() => setOpenModal(false)} maxWidth="sm" fullWidth>
-                <DialogTitle sx={{ fontWeight: 'bold', bgcolor: '#1976d2', color: 'white' }}>
-                    Jelentkezési Lap leadása
+            {/* --- JELENTKEZÉS MODAL (JAVÍTOTT MARGÓK MOBILON) --- */}
+            <Dialog open={openModal} onClose={() => setOpenModal(false)} maxWidth="sm" fullWidth PaperProps={{ sx: { m: { xs: 2, sm: 3 }, borderRadius: 3 } }}>
+                <DialogTitle sx={{ fontWeight: 'bold', bgcolor: 'primary.main', color: 'white', fontSize: { xs: '1.1rem', sm: '1.25rem' } }}>
+                    Jelentkezési Lap
                 </DialogTitle>
-                <DialogContent sx={{ mt: 2 }}>
+                <DialogContent sx={{ p: { xs: 2, sm: 3 }, pt: '16px !important' }}>
                     <Typography variant="body2" color="text.secondary" mb={3}>
-                        Kérjük, jelöld meg, mely területeken dolgoznál a legszívesebben!
+                        Kérjük, jelöld meg, mely területeken dolgoznál a legszívesebben! Többet is választhatsz.
                     </Typography>
 
-                    <Typography variant="subtitle1" fontWeight="bold" color="primary">Mely területek érdekelnek?</Typography>
-                    <FormGroup sx={{ mb: 3 }}>
+                    <Typography variant="subtitle2" fontWeight="bold" color="primary" textTransform="uppercase">1. Mely területek érdekelnek?</Typography>
+                    <FormGroup sx={{ mb: 1, mt: 1 }}>
                         {event.workAreas.map(area => (
                             <FormControlLabel
                                 key={area.id}
@@ -363,56 +380,30 @@ export default function EventDetails() {
                         ))}
                     </FormGroup>
 
-                    <Divider sx={{ my: 3 }} />
-
                     {event.questions && event.questions.length > 0 && (
                         <>
-                            <Typography variant="subtitle1" fontWeight="bold" color="primary" mb={2}>További információk</Typography>
+                            <Divider sx={{ my: 3 }} />
+                            <Typography variant="subtitle2" fontWeight="bold" color="primary" textTransform="uppercase" mb={2}>2. További információk</Typography>
                             {event.questions.map(q => (
                                 <Box key={q.id} mb={3}>
                                     {q.questionType === 'TEXT' && (
-                                        <TextField
-                                            fullWidth
-                                            label={q.questionText}
-                                            required={q.isRequired}
-                                            value={answers[q.id] || ''}
-                                            onChange={(e) => handleAnswerChange(q.id, e.target.value)}
-                                        />
+                                        <TextField fullWidth size="small" label={q.questionText} required={q.isRequired} value={answers[q.id] || ''} onChange={(e) => handleAnswerChange(q.id, e.target.value)} />
                                     )}
-
                                     {q.questionType === 'DROPDOWN' && (
-                                        <FormControl fullWidth required={q.isRequired}>
+                                        <FormControl fullWidth size="small" required={q.isRequired}>
                                             <InputLabel>{q.questionText}</InputLabel>
-                                            <Select
-                                                label={q.questionText}
-                                                value={answers[q.id] || ''}
-                                                onChange={(e) => handleAnswerChange(q.id, e.target.value)}
-                                            >
-                                                {q.options.split(',').map((opt, i) => (
-                                                    <MenuItem key={i} value={opt.trim()}>{opt.trim()}</MenuItem>
-                                                ))}
+                                            <Select label={q.questionText} value={answers[q.id] || ''} onChange={(e) => handleAnswerChange(q.id, e.target.value)}>
+                                                {q.options.split(',').map((opt, i) => (<MenuItem key={i} value={opt.trim()}>{opt.trim()}</MenuItem>))}
                                             </Select>
                                         </FormControl>
                                     )}
-
                                     {q.questionType === 'CHECKBOX' && (
                                         <FormControl component="fieldset" required={q.isRequired}>
-                                            <Typography variant="body1">{q.questionText} {q.isRequired && '*'}</Typography>
+                                            <Typography variant="body2" fontWeight="500" mb={1}>{q.questionText} {q.isRequired && '*'}</Typography>
                                             <FormGroup>
                                                 {q.options.split(',').map((opt, i) => {
                                                     const optionTrimmed = opt.trim();
-                                                    return (
-                                                        <FormControlLabel
-                                                            key={i}
-                                                            control={
-                                                                <Checkbox
-                                                                    checked={((answers[q.id] as string[]) || []).includes(optionTrimmed)}
-                                                                    onChange={() => handleCheckboxAnswerToggle(q.id, optionTrimmed)}
-                                                                />
-                                                            }
-                                                            label={optionTrimmed}
-                                                        />
-                                                    );
+                                                    return (<FormControlLabel key={i} control={<Checkbox size="small" checked={((answers[q.id] as string[]) || []).includes(optionTrimmed)} onChange={() => handleCheckboxAnswerToggle(q.id, optionTrimmed)}/>} label={<Typography variant="body2">{optionTrimmed}</Typography>} />);
                                                 })}
                                             </FormGroup>
                                         </FormControl>
@@ -422,13 +413,43 @@ export default function EventDetails() {
                         </>
                     )}
                 </DialogContent>
-                <DialogActions sx={{ p: 2, bgcolor: '#f5f5f5' }}>
+                <DialogActions sx={{ p: 2, bgcolor: '#f8fafc' }}>
                     <Button onClick={() => setOpenModal(false)} color="inherit" disabled={submitting}>Mégse</Button>
-                    <Button onClick={handleSubmitApplication} variant="contained" disabled={submitting}>
+                    <Button onClick={handleSubmitApplication} variant="contained" disabled={submitting} sx={{ borderRadius: 2 }}>
                         {submitting ? 'Beküldés...' : 'Jelentkezés Beküldése'}
                     </Button>
                 </DialogActions>
             </Dialog>
+
+            {/* --- VISSZAVONÁS MODAL --- */}
+            <Dialog open={withdrawModalOpen} onClose={() => setWithdrawModalOpen(false)} maxWidth="sm" fullWidth PaperProps={{ sx: { m: { xs: 2, sm: 3 }, borderRadius: 3 } }}>
+                <DialogTitle sx={{ bgcolor: 'error.main', color: 'white', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: 1, fontSize: { xs: '1.1rem', sm: '1.25rem' } }}>
+                    <DeleteIcon /> Jelentkezés visszavonása
+                </DialogTitle>
+                <DialogContent sx={{ p: { xs: 2, sm: 3 }, pt: '16px !important' }}>
+                    <Typography variant="body2" mb={2}>
+                        Sajnáljuk, hogy meggondoltad magad! Kérjük, oszd meg a szervezőkkel, hogy miért vonod vissza a jelentkezésedet (opcionális).
+                    </Typography>
+                    <TextField
+                        fullWidth
+                        autoFocus
+                        multiline
+                        rows={3}
+                        label="Visszavonás oka"
+                        variant="outlined"
+                        placeholder="Pl.: Közbejött egy családi esemény..."
+                        value={withdrawReason}
+                        onChange={(e) => setWithdrawReason(e.target.value)}
+                    />
+                </DialogContent>
+                <DialogActions sx={{ p: 2, bgcolor: '#f8fafc' }}>
+                    <Button onClick={() => setWithdrawModalOpen(false)} color="inherit" disabled={withdrawing}>Mégse</Button>
+                    <Button onClick={confirmWithdraw} variant="contained" color="error" disabled={withdrawing} sx={{ borderRadius: 2 }}>
+                        {withdrawing ? 'Folyamatban...' : 'Végleges Visszavonás'}
+                    </Button>
+                </DialogActions>
+            </Dialog>
+
         </Container>
     );
 }

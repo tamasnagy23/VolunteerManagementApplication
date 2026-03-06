@@ -1,9 +1,13 @@
 package com.example.volunteermanagement.controller;
 
 import com.example.volunteermanagement.dto.EventDTO;
+import com.example.volunteermanagement.dto.ShiftDTO;
+import com.example.volunteermanagement.dto.WorkAreaDTO;
 import com.example.volunteermanagement.model.Event;
 import com.example.volunteermanagement.service.EventService;
+import com.example.volunteermanagement.service.ShiftService;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.http.HttpStatus;
@@ -11,6 +15,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.security.Principal;
+import java.util.List;
 
 @RestController
 @RequestMapping("/api/events")
@@ -19,12 +24,12 @@ public class EventController {
 
     private final EventService eventService;
 
+    @Autowired
+    private ShiftService shiftService;
+
     @PostMapping
     public ResponseEntity<EventDTO> createEvent(@RequestBody EventDTO eventDTO, Principal principal) {
-        // A service most már a mentett entitást adja vissza, de mi rögtön DTO-vá alakítjuk
         Event createdEvent = eventService.createEventWithWorkAreas(eventDTO, principal.getName());
-
-        // Alakítsuk át DTO-vá a válasz előtt (használd a Service-ben már megírt convertToDTO-t vagy kézzel):
         return ResponseEntity.status(HttpStatus.CREATED).body(eventService.getEventDTOById(createdEvent.getId()));
     }
 
@@ -35,18 +40,30 @@ public class EventController {
 
     @GetMapping("/{id}")
     public ResponseEntity<EventDTO> getEventById(@PathVariable Long id) {
-        // Átállítva, hogy DTO-t adjon vissza a terület listával együtt
         return ResponseEntity.ok(eventService.getEventDTOById(id));
     }
 
+    // --- JAVÍTVA: Principal hozzáadva a módosításhoz ---
     @PutMapping("/{id}")
-    public ResponseEntity<Event> updateEvent(@PathVariable Long id, @RequestBody EventDTO eventDTO) {
-        return ResponseEntity.ok(eventService.updateEvent(id, eventDTO));
+    public ResponseEntity<Event> updateEvent(@PathVariable Long id, @RequestBody EventDTO eventDTO, Principal principal) {
+        return ResponseEntity.ok(eventService.updateEvent(id, eventDTO, principal.getName()));
     }
 
+    // --- JAVÍTVA: Principal hozzáadva a törléshez ---
     @DeleteMapping("/{id}")
-    public ResponseEntity<Void> deleteEvent(@PathVariable Long id) {
-        eventService.deleteEvent(id);
+    public ResponseEntity<Void> deleteEvent(@PathVariable Long id, Principal principal) {
+        eventService.deleteEvent(id, principal.getName());
         return ResponseEntity.noContent().build();
+    }
+
+    @GetMapping("/{id}/shifts")
+    public ResponseEntity<List<ShiftDTO>> getEventShifts(@PathVariable Long id) {
+        return ResponseEntity.ok(shiftService.getShiftsByEvent(id));
+    }
+
+    @GetMapping("/{id}/work-areas")
+    public ResponseEntity<List<WorkAreaDTO>> getEventWorkAreas(@PathVariable Long id) {
+        // Feltételezve, hogy az EventService-ben van már ilyen, vagy lekérhető:
+        return ResponseEntity.ok(eventService.getWorkAreasByEventId(id));
     }
 }

@@ -3,7 +3,7 @@ import {
     Container, Typography, Button, Box,
     CircularProgress, Divider, Paper, Alert,
     Accordion, AccordionSummary, AccordionDetails, Chip,
-    Tabs, Tab, TextField, InputAdornment, Pagination,
+    TextField, InputAdornment, Pagination,
     Card, CardContent, CardActions, Dialog, DialogTitle,
     DialogContent, DialogActions, Avatar, FormControl, Select, MenuItem
 } from '@mui/material';
@@ -22,6 +22,10 @@ import LocationOnIcon from '@mui/icons-material/LocationOn';
 import EmailIcon from '@mui/icons-material/Email';
 import PhoneIcon from '@mui/icons-material/Phone';
 import InfoIcon from '@mui/icons-material/Info';
+import PlayCircleOutlineIcon from '@mui/icons-material/PlayCircleOutline';
+import AccessTimeIcon from '@mui/icons-material/AccessTime';
+import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
+import SecurityIcon from '@mui/icons-material/Security';
 
 import EventCard from "./EventCard";
 
@@ -29,7 +33,6 @@ import EventCard from "./EventCard";
 interface Shift { id: number; startTime: string; endTime: string; maxVolunteers: number; }
 interface Organization { id: number; name: string; address: string; description?: string; email?: string; phone?: string; }
 interface Event { id: number; title: string; description: string; location: string; shifts: Shift[]; organization?: Organization; }
-// ÚJ: Hozzáadtuk a rejectionMessage mezőt
 interface UserMembership { orgId?: number; orgName?: string; orgRole?: string; organization?: Organization; role?: string; status: string; rejectionMessage?: string; }
 interface UserProfile { name: string; role: string; memberships: UserMembership[]; }
 
@@ -44,7 +47,7 @@ export default function Dashboard() {
     const [error, setError] = useState('');
 
     // UI Állapotok
-    const [currentTab, setCurrentTab] = useState(0); // 0 = Saját, 1 = Felfedezés
+    const [currentTab, setCurrentTab] = useState(0);
     const [expandedOrg, setExpandedOrg] = useState<string | false>(false);
     const [selectedOrgModal, setSelectedOrgModal] = useState<Organization | null>(null);
     const [joiningId, setJoiningId] = useState<number | null>(null);
@@ -63,6 +66,10 @@ export default function Dashboard() {
     // Kilépés Állapotok
     const [leaveOrgModal, setLeaveOrgModal] = useState<{ id: number, name: string } | null>(null);
     const [leaving, setLeaving] = useState(false);
+
+    // Belső eseményfülek és keresők állapotai szervezetenként
+    const [orgEventTabs, setOrgEventTabs] = useState<Record<string, number>>({});
+    const [orgEventSearches, setOrgEventSearches] = useState<Record<string, string>>({});
 
     useEffect(() => { setMyPage(1); }, [mySearch, mySort]);
     useEffect(() => { setDiscoverPage(1); }, [discoverSearch]);
@@ -92,7 +99,15 @@ export default function Dashboard() {
 
     useEffect(() => { fetchData(); }, []);
 
-    // --- LOGIKA: SAJÁT CSAPATOK ---
+    const canSeeAuditLog = useMemo(() => {
+        if (!user) return false;
+        if (user.role === 'SYS_ADMIN') return true;
+        return user.memberships?.some(m =>
+            m.status === 'APPROVED' &&
+            (m.orgRole === 'OWNER' || m.orgRole === 'ORGANIZER' || m.role === 'OWNER' || m.role === 'ORGANIZER')
+        );
+    }, [user]);
+
     const groupedEvents = useMemo(() => {
         return events.reduce((acc, event) => {
             const orgName = event.organization?.name || 'Egyéb';
@@ -122,16 +137,26 @@ export default function Dashboard() {
         };
     }, [allMyOrgNames, mySearch, mySort, myPage]);
 
+    const getEventCategory = (event: Event) => {
+        // Biztonsági ellenőrzés, ha valamiért hiányozna a dátum
+        if (!event.startTime || !event.endTime) return 'UPCOMING';
 
-    // --- LOGIKA: FELFEDEZÉS ---
+        const now = new Date().getTime();
+        const start = new Date(event.startTime).getTime();
+        const end = new Date(event.endTime).getTime();
 
-    // ÚJ: Most már visszaadjuk az üzenetet is, nem csak a státuszt
+        if (now >= start && now <= end) {
+            return 'ACTIVE';   // Épp most zajlik
+        } else if (now < start) {
+            return 'UPCOMING'; // Még nem kezdődött el
+        } else {
+            return 'PAST';     // Már véget ért
+        }
+    };
+
     const getMembershipInfo = (orgId: number) => {
         const membership = user?.memberships?.find(m => m.orgId === orgId || m.organization?.id === orgId);
-        return {
-            status: membership ? membership.status : 'NONE',
-            rejectionMessage: membership?.rejectionMessage
-        };
+        return { status: membership ? membership.status : 'NONE', rejectionMessage: membership?.rejectionMessage };
     };
 
     const handleJoin = async (orgId: number) => {
@@ -139,40 +164,26 @@ export default function Dashboard() {
             setJoiningId(orgId);
             await api.post(`/organizations/${orgId}/join`);
             await fetchData();
-        } catch {
-            alert("Nem sikerült csatlakozni a szervezethez.");
-        } finally {
-            setJoiningId(null);
-        }
+        } catch { alert("Nem sikerült csatlakozni a szervezethez."); } finally { setJoiningId(null); }
     };
 
-    // --- LOGIKA: KILÉPÉS ---
     const handleLeaveOrganization = async () => {
         if (!leaveOrgModal) return;
         setLeaving(true);
         try {
             await api.delete(`/organizations/${leaveOrgModal.id}/leave`);
-
             setUser(prev => prev ? {
                 ...prev,
                 memberships: prev.memberships.map(m =>
-                    (m.orgId === leaveOrgModal.id || m.organization?.id === leaveOrgModal.id)
-                        ? { ...m, status: 'LEFT' }
-                        : m
+                    (m.orgId === leaveOrgModal.id || m.organization?.id === leaveOrgModal.id) ? { ...m, status: 'LEFT' } : m
                 )
             } : prev);
-
             setLeaveOrgModal(null);
             await fetchData();
         } catch (err: unknown) {
-            if (axios.isAxiosError(err)) {
-                alert(err.response?.data || "Hiba történt a kilépés során.");
-            } else {
-                alert("Váratlan hiba történt.");
-            }
-        } finally {
-            setLeaving(false);
-        }
+            if (axios.isAxiosError(err)) alert(err.response?.data || "Hiba történt a kilépés során.");
+            else alert("Váratlan hiba történt.");
+        } finally { setLeaving(false); }
     };
 
     const paginatedDiscoverOrgs = useMemo(() => {
@@ -187,46 +198,75 @@ export default function Dashboard() {
     if (loading) return <Box display="flex" justifyContent="center" alignItems="center" minHeight="80vh"><CircularProgress size={60} thickness={4} /></Box>;
 
     return (
-        <Container maxWidth="lg" sx={{ mt: 5, mb: 10 }}>
-            {/* FEJLÉC ÉS FÜLEK */}
-            <Box mb={4}>
-                <Typography variant="h3" fontWeight="900" gutterBottom sx={{ color: '#1a237e', letterSpacing: '-1px' }}>
-                    Szia, {user?.name}! 👋
-                </Typography>
-                <Typography variant="h6" color="text.secondary" fontWeight="400" mb={3}>
-                    Kezeld a saját eseményeidet, vagy fedezz fel új lehetőségeket.
-                </Typography>
-
-                {error && <Alert severity="error" sx={{ mb: 3 }}>{error}</Alert>}
-
-                <Box sx={{ borderBottom: 1, borderColor: 'divider' }}>
-                    <Tabs value={currentTab} onChange={(_e, newValue) => setCurrentTab(newValue)} variant="fullWidth">
-                        <Tab icon={<BusinessIcon sx={{ mr: 1, verticalAlign: 'middle' }} />} iconPosition="start" label={<Typography fontWeight="bold" fontSize="1.1rem">Saját Csapataim</Typography>} />
-                        <Tab icon={<SearchIcon sx={{ mr: 1, verticalAlign: 'middle' }} />} iconPosition="start" label={<Typography fontWeight="bold" fontSize="1.1rem">Felfedezés (Katalógus)</Typography>} />
-                    </Tabs>
+        <Container maxWidth="lg" sx={{ mt: { xs: 3, md: 5 }, mb: 10 }}>
+            {/* FEJLÉC */}
+            <Box mb={4} display="flex" flexDirection={{ xs: 'column', md: 'row' }} justifyContent="space-between" alignItems={{ xs: 'flex-start', md: 'center' }} gap={2}>
+                <Box>
+                    <Typography variant="h3" fontSize={{ xs: '2rem', md: '3rem' }} fontWeight="900" gutterBottom sx={{ color: '#1a237e', letterSpacing: '-1px' }}>
+                        Szia, {user?.name}! 👋
+                    </Typography>
+                    <Typography variant="h6" fontSize={{ xs: '1rem', md: '1.25rem' }} color="text.secondary" fontWeight="400">
+                        Kezeld a saját eseményeidet, vagy fedezz fel új lehetőségeket.
+                    </Typography>
                 </Box>
+
+                {canSeeAuditLog && (
+                    <Button
+                        variant="contained" color="secondary" startIcon={<SecurityIcon />}
+                        onClick={() => navigate('/logs')}
+                        sx={{ borderRadius: 2, fontWeight: 'bold', boxShadow: 3, px: 3, py: 1.5, width: { xs: '100%', md: 'auto' } }}
+                    >
+                        {user?.role === 'SYS_ADMIN' ? 'Rendszernapló (Audit)' : 'Eseménynapló'}
+                    </Button>
+                )}
             </Box>
+
+            {error && <Alert severity="error" sx={{ mb: 3 }}>{error}</Alert>}
+
+            {/* FŐ KATEGÓRIAVÁLASZTÓ */}
+            <Paper elevation={0} sx={{ display: 'flex', p: 0.5, bgcolor: '#edf2f7', borderRadius: 3, mb: 4 }}>
+                <Button
+                    fullWidth
+                    disableElevation
+                    onClick={() => setCurrentTab(0)}
+                    variant={currentTab === 0 ? 'contained' : 'text'}
+                    color={currentTab === 0 ? 'primary' : 'inherit'}
+                    startIcon={<BusinessIcon />}
+                    sx={{ borderRadius: 2.5, py: 1.5, fontWeight: 'bold', transition: 'all 0.2s', color: currentTab === 0 ? 'white' : 'text.secondary' }}
+                >
+                    Csapataim
+                </Button>
+                <Button
+                    fullWidth
+                    disableElevation
+                    onClick={() => setCurrentTab(1)}
+                    variant={currentTab === 1 ? 'contained' : 'text'}
+                    color={currentTab === 1 ? 'primary' : 'inherit'}
+                    startIcon={<SearchIcon />}
+                    sx={{ borderRadius: 2.5, py: 1.5, fontWeight: 'bold', transition: 'all 0.2s', color: currentTab === 1 ? 'white' : 'text.secondary' }}
+                >
+                    Felfedezés
+                </Button>
+            </Paper>
 
             {/* --- 1. FÜL: SAJÁT CSAPATAIM --- */}
             {currentTab === 0 && (
                 <Box>
                     {allMyOrgNames.length === 0 ? (
-                        <Paper sx={{ p: 6, textAlign: 'center', bgcolor: '#f8fafd', borderRadius: 4, border: '1px dashed #e0e0e0' }}>
+                        <Paper sx={{ p: { xs: 3, md: 6 }, textAlign: 'center', bgcolor: '#f8fafd', borderRadius: 4, border: '1px dashed #e0e0e0' }}>
                             <BusinessIcon sx={{ fontSize: 60, color: '#bdbdbd', mb: 2 }} />
                             <Typography variant="h5" color="text.secondary" fontWeight="bold" gutterBottom>Még nem tartozol egy csapathoz sem.</Typography>
-                            <Typography variant="body1" color="text.secondary" mb={3}>Kattints a 'Felfedezés' fülre, és csatlakozz az első szervezetedhez!</Typography>
-                            <Button variant="contained" onClick={() => setCurrentTab(1)}>Katalógus megnyitása</Button>
+                            <Button variant="contained" onClick={() => setCurrentTab(1)} sx={{ mt: 2 }}>Katalógus megnyitása</Button>
                         </Paper>
                     ) : (
                         <Box>
-                            {/* Kereső és Rendező Sáv */}
                             <Box display="flex" flexDirection={{ xs: 'column', sm: 'row' }} gap={2} mb={3}>
                                 <TextField
                                     fullWidth size="small" placeholder="Keresés a csapataim között..."
                                     value={mySearch} onChange={(e) => setMySearch(e.target.value)}
-                                    slotProps={{ input: { startAdornment: <InputAdornment position="start"><SearchIcon /></InputAdornment> } }}
+                                    InputProps={{ startAdornment: <InputAdornment position="start"><SearchIcon /></InputAdornment> }}
                                 />
-                                <FormControl size="small" sx={{ minWidth: 200 }}>
+                                <FormControl size="small" sx={{ minWidth: { xs: '100%', sm: 200 } }}>
                                     <Select value={mySort} onChange={(e) => setMySort(e.target.value as 'asc'|'desc')}>
                                         <MenuItem value="asc">Rendezés: A - Z</MenuItem>
                                         <MenuItem value="desc">Rendezés: Z - A</MenuItem>
@@ -234,18 +274,31 @@ export default function Dashboard() {
                                 </FormControl>
                             </Box>
 
-                            {/* Accordion Lista */}
                             {paginatedMyOrgs.items.length === 0 ? (
                                 <Typography color="text.secondary" textAlign="center" py={4}>Nincs találat a keresésre.</Typography>
                             ) : (
                                 paginatedMyOrgs.items.map((orgName) => {
                                     const orgEvents = groupedEvents[orgName] || [];
+                                    const targetOrg = allOrganizations.find(o => o.name === orgName);
+                                    const targetOrgId = targetOrg?.id;
                                     const myMembership = user?.memberships?.find(m => (m.orgName === orgName || m.organization?.name === orgName) && m.status === 'APPROVED');
                                     const myRoleInThisOrg = myMembership?.orgRole || myMembership?.role || '';
 
                                     const isLeaderForThisOrg = user?.role === 'SYS_ADMIN' || ['OWNER', 'ORGANIZER'].includes(myRoleInThisOrg);
                                     const canManageApps = user?.role === 'SYS_ADMIN' || ['OWNER', 'ORGANIZER', 'COORDINATOR'].includes(myRoleInThisOrg);
                                     const orgIdToLeave = myMembership?.orgId || myMembership?.organization?.id;
+
+                                    const currentInnerTab = orgEventTabs[orgName] || 0;
+                                    const currentInnerSearch = orgEventSearches[orgName] || '';
+
+                                    const filteredOrgEvents = orgEvents.filter(event => {
+                                        if (currentInnerSearch && !event.title.toLowerCase().includes(currentInnerSearch.toLowerCase())) return false;
+                                        const category = getEventCategory(event);
+                                        if (currentInnerTab === 0 && category !== 'ACTIVE') return false;
+                                        if (currentInnerTab === 1 && category !== 'UPCOMING') return false;
+                                        if (currentInnerTab === 2 && category !== 'PAST') return false;
+                                        return true;
+                                    });
 
                                     return (
                                         <Accordion
@@ -255,31 +308,71 @@ export default function Dashboard() {
                                             sx={{ mb: 2, borderRadius: '12px !important', '&::before': { display: 'none' }, border: '1px solid', borderColor: expandedOrg === orgName ? 'primary.main' : 'grey.200', overflow: 'hidden' }}
                                         >
                                             <AccordionSummary expandIcon={<ExpandMoreIcon />} sx={{ bgcolor: expandedOrg === orgName ? '#f4fafe' : 'white', py: 1 }}>
-                                                <Box display="flex" flexDirection={{ xs: 'column', sm: 'row' }} justifyContent="space-between" alignItems={{ xs: 'flex-start', sm: 'center' }} width="100%" gap={2}>
+                                                <Box
+                                                    display="flex"
+                                                    flexDirection={{ xs: 'column', md: 'row' }}
+                                                    justifyContent="space-between"
+                                                    alignItems={{ xs: 'flex-start', md: 'center' }}
+                                                    width="100%"
+                                                    gap={2}
+                                                >
+                                                    {/* --- BAL OLDAL --- */}
                                                     <Box display="flex" alignItems="center" gap={2}>
                                                         <Avatar sx={{ bgcolor: 'primary.main' }}><BusinessIcon /></Avatar>
                                                         <Box>
-                                                            <Typography variant="h6" fontWeight="bold">{orgName}</Typography>
-                                                            <Box display="flex" alignItems="center" gap={1} mt={0.5}>
-                                                                <Chip label={myRoleInThisOrg === 'OWNER' ? 'Alapító' : myRoleInThisOrg === 'ORGANIZER' ? 'Szervező' : myRoleInThisOrg === 'COORDINATOR' ? 'Koordinátor' : 'Önkéntes'} size="small" color={isLeaderForThisOrg ? "secondary" : "default"} variant={isLeaderForThisOrg ? "filled" : "outlined"} />
+                                                            <Typography variant="h6" fontWeight="bold" lineHeight={1.2}>{orgName}</Typography>
+                                                            <Box display="flex" alignItems="center" flexWrap="wrap" gap={1} mt={0.5}>
+                                                                <Chip label={myRoleInThisOrg === 'OWNER' ? 'Alapító' : myRoleInThisOrg === 'ORGANIZER' ? 'Szervező' : myRoleInThisOrg === 'COORDINATOR' ? 'Koordinátor' : 'Önkéntes'} size="small" color={isLeaderForThisOrg ? "secondary" : "default"} variant={isLeaderForThisOrg ? "filled" : "outlined"} sx={{ height: 20, fontSize: '0.7rem' }} />
                                                                 <Typography variant="caption" color="text.secondary">{orgEvents.length} esemény</Typography>
                                                             </Box>
                                                         </Box>
                                                     </Box>
 
-                                                    <Box display="flex" flexWrap="wrap" gap={1} onClick={(e) => e.stopPropagation()}>
+                                                    {/* --- JAVÍTOTT: JOBB OLDAL GOMBOK --- */}
+                                                    <Box
+                                                        component="div"
+                                                        onClick={(e) => e.stopPropagation()}
+                                                        onFocus={(e) => e.stopPropagation()}
+                                                        sx={{
+                                                            display: 'flex',
+                                                            flexDirection: { xs: 'column', sm: 'row' },
+                                                            gap: 1.5,
+                                                            width: { xs: '100%', md: 'auto' }
+                                                        }}
+                                                    >
                                                         {isLeaderForThisOrg && (
-                                                            <>
-                                                                <Button variant="contained" size="small" startIcon={<AddIcon />} onClick={() => navigate('/create-event')} sx={{ borderRadius: 2 }}>Új Esemény</Button>
-                                                                <Button variant="outlined" size="small" startIcon={<GroupIcon />} onClick={() => navigate('/team')} sx={{ borderRadius: 2 }}>Csapat</Button>
-                                                            </>
+                                                            <Box component="div" sx={{ display: 'flex', gap: 1, width: { xs: '100%', sm: 'auto' } }}>
+                                                                <Button
+                                                                    component="div"
+                                                                    variant="contained"
+                                                                    size="small"
+                                                                    startIcon={<AddIcon />}
+                                                                    onClick={(e) => {
+                                                                        e.stopPropagation();
+                                                                        navigate('/create-event', { state: { selectedOrgId: targetOrgId } });
+                                                                    }}
+                                                                    sx={{ borderRadius: 2, whiteSpace: 'nowrap', px: 2.5, flex: { xs: 1, sm: 'initial' } }}
+                                                                >
+                                                                    Új Esemény
+                                                                </Button>
+                                                                <Button
+                                                                    component="div"
+                                                                    variant="outlined"
+                                                                    size="small"
+                                                                    startIcon={<GroupIcon />}
+                                                                    onClick={(e) => { e.stopPropagation(); navigate('/team'); }}
+                                                                    sx={{ borderRadius: 2, whiteSpace: 'nowrap', px: 2.5, flex: { xs: 1, sm: 'initial' } }}
+                                                                >
+                                                                    Csapat
+                                                                </Button>
+                                                            </Box>
                                                         )}
-                                                        {/* KILÉPÉS GOMB */}
                                                         {myRoleInThisOrg !== 'OWNER' && orgIdToLeave && (
                                                             <Button
+                                                                component="div"
                                                                 variant="outlined" color="error" size="small"
-                                                                onClick={() => setLeaveOrgModal({ id: orgIdToLeave, name: orgName })}
-                                                                sx={{ borderRadius: 2 }}
+                                                                onClick={(e) => { e.stopPropagation(); setLeaveOrgModal({ id: orgIdToLeave, name: orgName }); }}
+                                                                sx={{ borderRadius: 2, px: 2.5, width: { xs: '100%', sm: 'auto' } }}
                                                             >
                                                                 Kilépés
                                                             </Button>
@@ -288,18 +381,53 @@ export default function Dashboard() {
                                                 </Box>
                                             </AccordionSummary>
                                             <Divider />
-                                            <AccordionDetails sx={{ bgcolor: '#fafafa', p: 3 }}>
-                                                {orgEvents.length === 0 ? (
-                                                    <Typography variant="body1" color="text.secondary" textAlign="center" fontStyle="italic">Ebben a szervezetben jelenleg nincsenek aktív események.</Typography>
-                                                ) : (
-                                                    <Grid container spacing={3}>
-                                                        {orgEvents.map((event) => (
-                                                            <Grid size={{ xs: 12, sm: 6, md: 4 }} key={event.id}>
+
+                                            <AccordionDetails sx={{ bgcolor: '#fafafa', p: { xs: 2, md: 3 } }}>
+                                                <Box display="flex" flexDirection={{ xs: 'column', md: 'row' }} justifyContent="space-between" alignItems="stretch" gap={2} mb={3} p={1.5} sx={{ bgcolor: 'white', borderRadius: 3, border: '1px solid #eee' }}>
+                                                    <Paper elevation={0} sx={{ display: 'flex', p: 0.5, bgcolor: '#f4f6f8', borderRadius: 2, flexGrow: 1, width: { xs: '100%', md: 'auto' } }}>
+                                                        {[
+                                                            { label: 'Aktív', icon: <PlayCircleOutlineIcon sx={{fontSize: 18, mr: 0.5}}/> },
+                                                            { label: 'Közelgő', icon: <AccessTimeIcon sx={{fontSize: 18, mr: 0.5}}/> },
+                                                            { label: 'Lezárult', icon: <CheckCircleOutlineIcon sx={{fontSize: 18, mr: 0.5}}/> }
+                                                        ].map((tab, idx) => (
+                                                            <Button
+                                                                key={tab.label}
+                                                                fullWidth
+                                                                disableElevation
+                                                                size="small"
+                                                                onClick={() => setOrgEventTabs(prev => ({ ...prev, [orgName]: idx }))}
+                                                                variant={currentInnerTab === idx ? 'contained' : 'text'}
+                                                                color={currentInnerTab === idx ? 'primary' : 'inherit'}
+                                                                sx={{ borderRadius: 1.5, py: 0.8, color: currentInnerTab === idx ? 'white' : 'text.secondary', fontWeight: 'bold' }}
+                                                            >
+                                                                <Box display="flex" alignItems="center">{tab.icon} {tab.label}</Box>
+                                                            </Button>
+                                                        ))}
+                                                    </Paper>
+
+                                                    <TextField
+                                                        size="small"
+                                                        placeholder="Esemény keresése..."
+                                                        value={currentInnerSearch}
+                                                        onChange={(e) => setOrgEventSearches(prev => ({ ...prev, [orgName]: e.target.value }))}
+                                                        InputProps={{ startAdornment: <InputAdornment position="start"><SearchIcon fontSize="small" /></InputAdornment> }}
+                                                        sx={{ minWidth: { xs: '100%', md: '250px' } }}
+                                                    />
+                                                </Box>
+
+                                                <Grid container spacing={3}>
+                                                    {filteredOrgEvents.length === 0 ? (
+                                                        <Box textAlign="center" py={4} width="100%">
+                                                            <Typography variant="body2" color="text.secondary" fontStyle="italic">Nincs találat ebben a kategóriában.</Typography>
+                                                        </Box>
+                                                    ) : (
+                                                        filteredOrgEvents.map((event) => (
+                                                            <Grid size={{xs:12, sm:6, md:4}} key={event.id}>
                                                                 <EventCard event={event} isLeader={isLeaderForThisOrg} canManageApplications={canManageApps} />
                                                             </Grid>
-                                                        ))}
-                                                    </Grid>
-                                                )}
+                                                        ))
+                                                    )}
+                                                </Grid>
                                             </AccordionDetails>
                                         </Accordion>
                                     );
@@ -308,7 +436,7 @@ export default function Dashboard() {
 
                             {paginatedMyOrgs.total > MY_ORGS_PER_PAGE && (
                                 <Box display="flex" justifyContent="center" mt={4}>
-                                    <Pagination count={Math.ceil(paginatedMyOrgs.total / MY_ORGS_PER_PAGE)} page={myPage} onChange={(_e, p) => setMyPage(p)} color="primary" />
+                                    <Pagination count={Math.ceil(paginatedMyOrgs.total / MY_ORGS_PER_PAGE)} page={myPage} onChange={(_e, p) => setMyPage(p)} color="primary" siblingCount={0} />
                                 </Box>
                             )}
                         </Box>
@@ -323,18 +451,18 @@ export default function Dashboard() {
                         <TextField
                             fullWidth size="medium" placeholder="Keresés a szervezetek között..."
                             value={discoverSearch} onChange={(e) => setDiscoverSearch(e.target.value)}
-                            slotProps={{ input: { startAdornment: <InputAdornment position="start"><SearchIcon color="primary" /></InputAdornment>, sx: { bgcolor: 'white', borderRadius: 2 } } }}
+                            InputProps={{ startAdornment: <InputAdornment position="start"><SearchIcon color="primary" /></InputAdornment>, sx: { bgcolor: 'white', borderRadius: 2 } }}
                         />
                     </Box>
 
-                    {paginatedDiscoverOrgs.items.length === 0 ? (
-                        <Typography color="text.secondary" textAlign="center" py={4}>Nincs a keresésnek megfelelő szervezet.</Typography>
-                    ) : (
-                        <Grid container spacing={4}>
-                            {paginatedDiscoverOrgs.items.map((org) => {
+                    <Grid container spacing={4}>
+                        {paginatedDiscoverOrgs.items.length === 0 ? (
+                            <Typography color="text.secondary" textAlign="center" py={4} width="100%">Nincs a keresésnek megfelelő szervezet.</Typography>
+                        ) : (
+                            paginatedDiscoverOrgs.items.map((org) => {
                                 const { status, rejectionMessage } = getMembershipInfo(org.id);
                                 return (
-                                    <Grid size={{ xs: 12, sm: 6, md: 4 }} key={org.id}>
+                                    <Grid size={{xs:12, sm:6, md:4}}  key={org.id}>
                                         <Card elevation={3} sx={{ height: '100%', display: 'flex', flexDirection: 'column', borderRadius: 3, transition: '0.3s', '&:hover': { transform: 'translateY(-5px)', boxShadow: 6 } }}>
                                             <CardContent sx={{ flexGrow: 1, textAlign: 'center', pt: 4 }}>
                                                 <BusinessIcon sx={{ fontSize: 60, color: '#1976d2', opacity: 0.8, mb: 2 }} />
@@ -345,26 +473,17 @@ export default function Dashboard() {
 
                                                 {(status === 'NONE' || status === 'LEFT') && <Button variant="contained" fullWidth onClick={() => handleJoin(org.id)} disabled={joiningId === org.id}>{joiningId === org.id ? <CircularProgress size={24} /> : 'Csatlakozom'}</Button>}
                                                 {status === 'PENDING' && <Button variant="contained" fullWidth disabled sx={{ bgcolor: 'warning.light', color: 'warning.dark', '&.Mui-disabled': { bgcolor: '#ffe0b2', color: '#e65100' } }}>Elbírálás alatt</Button>}
-                                                {/* 3. MÁR TAG (KILÉPÉS LEHETŐSÉGÉVEL) */}
                                                 {status === 'APPROVED' && (
                                                     <Box sx={{ width: '100%', display: 'flex', flexDirection: 'column', gap: 1 }}>
                                                         <Button variant="contained" fullWidth disabled sx={{ bgcolor: '#c8e6c9', color: '#1b5e20', '&.Mui-disabled': { bgcolor: '#c8e6c9', color: '#1b5e20' } }}>
                                                             Már tag vagy
                                                         </Button>
-                                                        {/* Itt a plusz opció a felfedezés fülön is! */}
-                                                        <Button
-                                                            variant="text"
-                                                            color="error"
-                                                            size="small"
-                                                            onClick={() => setLeaveOrgModal({ id: org.id, name: org.name })}
-                                                            sx={{ fontSize: '0.75rem' }}
-                                                        >
+                                                        <Button variant="text" color="error" size="small" onClick={() => setLeaveOrgModal({ id: org.id, name: org.name })} sx={{ fontSize: '0.75rem' }}>
                                                             Tagság megszüntetése
                                                         </Button>
                                                     </Box>
                                                 )}
 
-                                                {/* --- ÚJ: ELUTASÍTÁS INDOKLÁSSAL --- */}
                                                 {status === 'REJECTED' && (
                                                     <Box sx={{ width: '100%' }}>
                                                         {rejectionMessage && (
@@ -372,11 +491,7 @@ export default function Dashboard() {
                                                                 <strong>Szervező üzenete:</strong> {rejectionMessage}
                                                             </Typography>
                                                         )}
-                                                        <Button
-                                                            variant="outlined" color="error" fullWidth
-                                                            onClick={() => handleJoin(org.id)} disabled={joiningId === org.id}
-                                                            sx={{ fontWeight: 'bold' }}
-                                                        >
+                                                        <Button variant="outlined" color="error" fullWidth onClick={() => handleJoin(org.id)} disabled={joiningId === org.id} sx={{ fontWeight: 'bold' }}>
                                                             {joiningId === org.id ? <CircularProgress size={24} color="error" /> : 'Elutasítva - Újrajelentkezés'}
                                                         </Button>
                                                     </Box>
@@ -387,13 +502,13 @@ export default function Dashboard() {
                                         </Card>
                                     </Grid>
                                 );
-                            })}
-                        </Grid>
-                    )}
+                            })
+                        )}
+                    </Grid>
 
                     {paginatedDiscoverOrgs.total > DISCOVER_PER_PAGE && (
                         <Box display="flex" justifyContent="center" mt={5}>
-                            <Pagination count={Math.ceil(paginatedDiscoverOrgs.total / DISCOVER_PER_PAGE)} page={discoverPage} onChange={(_e, p) => setDiscoverPage(p)} color="primary" size="large" />
+                            <Pagination count={Math.ceil(paginatedDiscoverOrgs.total / DISCOVER_PER_PAGE)} page={discoverPage} onChange={(_e, p) => setDiscoverPage(p)} color="primary" size="large" siblingCount={0} />
                         </Box>
                     )}
                 </Box>

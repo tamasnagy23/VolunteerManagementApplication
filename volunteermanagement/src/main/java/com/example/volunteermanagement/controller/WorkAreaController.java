@@ -51,7 +51,8 @@ public class WorkAreaController {
                         area.getId(),
                         area.getName(),
                         area.getDescription(),
-                        area.getCapacity()
+                        area.getCapacity(),
+                        List.of()
                 ))
                 .collect(Collectors.toList());
 

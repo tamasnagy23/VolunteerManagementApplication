@@ -10,5 +10,7 @@ public record UserDTO(
         String name,
         String email,
         Role role,
-        List<OrgMembershipDTO> memberships
+        String phoneNumber,
+        List<OrgMembershipDTO> memberships,
+        UserStatsDTO stats
 ) {}
