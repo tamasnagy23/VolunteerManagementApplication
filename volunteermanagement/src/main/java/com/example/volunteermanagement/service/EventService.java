@@ -7,6 +7,7 @@ import com.example.volunteermanagement.dto.OrganizationDTO;
 import com.example.volunteermanagement.model.*;
 import com.example.volunteermanagement.repository.EventRepository;
 import com.example.volunteermanagement.repository.OrganizationRepository;
+import com.example.volunteermanagement.repository.ShiftRepository;
 import com.example.volunteermanagement.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
@@ -26,6 +27,7 @@ public class EventService {
     private final UserRepository userRepository;
     private final AuditLogService auditLogService; // <-- ÚJ: Audit Log behozva
     private final OrganizationRepository organizationRepository;
+    private final ShiftRepository shiftRepository;
 
     @Transactional
     public Event createEventWithWorkAreas(EventDTO dto, String creatorEmail) {
@@ -130,37 +132,108 @@ public class EventService {
     }
 
     // --- JAVÍTVA: requesterEmail hozzáadva ---
+    // --- JAVÍTOTT: Okos frissítés, ami nem veszíti el a meglévő adatokat! ---
     @Transactional
     public Event updateEvent(Long id, EventDTO dto, String requesterEmail) {
         Event event = eventRepository.findById(id).orElseThrow();
-        Long orgId = event.getOrganization().getId(); // Lementjük a naplóhoz
+        Long orgId = event.getOrganization().getId();
 
+        // --- JAVÍTÁS: BEOSZTÁSOK IDŐKERETÉNEK VIZSGÁLATA ---
+        // Lekérjük az összes ehhez az eseményhez tartozó műszakot
+        List<Shift> existingShifts = shiftRepository.findByEventId(id);
+        for (Shift shift : existingShifts) {
+            // Ha valamelyik műszak kilóg az ÚJ esemény-időpontból
+            if (shift.getStartTime().isBefore(dto.startTime()) || shift.getEndTime().isAfter(dto.endTime())) {
+                throw new RuntimeException("Nem módosíthatod az esemény időtartamát!\n\n" +
+                        "A(z) '" + shift.getWorkArea().getName() + "' területen van egy meglévő idősáv (" +
+                        shift.getStartTime().toLocalDate() + " " + shift.getStartTime().toLocalTime() + " - " +
+                        shift.getEndTime().toLocalTime() + "), ami emiatt az eseményen kívülre esne.\n\n" +
+                        "Kérlek, előbb módosítsd vagy töröld azt a Beosztáskezelőben!");
+            }
+        }
+
+        // 1. Alapadatok frissítése
         event.setTitle(dto.title());
         event.setDescription(dto.description());
         event.setLocation(dto.location());
         event.setStartTime(dto.startTime());
         event.setEndTime(dto.endTime());
 
-        event.getWorkAreas().clear();
+        // 2. MUNKATERÜLETEK OKOS FRISSÍTÉSE
         if (dto.workAreas() != null) {
+            // A) Törlés: Ami az adatbázisban megvan, de a DTO-ban (Frontendről jövő adatokban) már nincs, azt töröljük.
+            List<Long> incomingWaIds = dto.workAreas().stream()
+                    .filter(w -> w.id() != null)
+                    .map(WorkAreaDTO::id)
+                    .collect(Collectors.toList());
+            event.getWorkAreas().removeIf(existingWa -> !incomingWaIds.contains(existingWa.getId()));
+
+            // B) Módosítás / Hozzáadás
             for (WorkAreaDTO waDto : dto.workAreas()) {
-                event.getWorkAreas().add(WorkArea.builder()
-                        .name(waDto.name()).description(waDto.description()).capacity(waDto.capacity()).event(event).build());
+                if (waDto.id() != null) {
+                    // Módosítás: Keressük meg a meglévőt és frissítsük az adatait
+                    event.getWorkAreas().stream()
+                            .filter(wa -> wa.getId().equals(waDto.id()))
+                            .findFirst()
+                            .ifPresent(existingWa -> {
+                                existingWa.setName(waDto.name());
+                                existingWa.setDescription(waDto.description());
+                                existingWa.setCapacity(waDto.capacity());
+                            });
+                } else {
+                    // Hozzáadás: Új munkaterület
+                    event.getWorkAreas().add(WorkArea.builder()
+                            .name(waDto.name())
+                            .description(waDto.description())
+                            .capacity(waDto.capacity())
+                            .event(event)
+                            .build());
+                }
             }
+        } else {
+            event.getWorkAreas().clear();
         }
 
-        event.getQuestions().clear();
+        // 3. KÉRDÉSEK OKOS FRISSÍTÉSE
         if (dto.questions() != null) {
+            // A) Törlés: Ami nincs a bejövő listában, azt töröljük az adatbázisból
+            List<Long> incomingQIds = dto.questions().stream()
+                    .filter(q -> q.id() != null)
+                    .map(EventQuestionDTO::id)
+                    .collect(Collectors.toList());
+            event.getQuestions().removeIf(existingQ -> !incomingQIds.contains(existingQ.getId()));
+
+            // B) Módosítás / Hozzáadás
             for (EventQuestionDTO qDto : dto.questions()) {
-                event.getQuestions().add(EventQuestion.builder()
-                        .questionText(qDto.questionText()).questionType(qDto.questionType())
-                        .options(qDto.options()).isRequired(qDto.isRequired()).event(event).build());
+                if (qDto.id() != null) {
+                    // Módosítás
+                    event.getQuestions().stream()
+                            .filter(q -> q.getId().equals(qDto.id()))
+                            .findFirst()
+                            .ifPresent(existingQ -> {
+                                existingQ.setQuestionText(qDto.questionText());
+                                existingQ.setQuestionType(qDto.questionType());
+                                existingQ.setOptions(qDto.options());
+                                existingQ.setRequired(qDto.isRequired());
+                            });
+                } else {
+                    // Hozzáadás
+                    event.getQuestions().add(EventQuestion.builder()
+                            .questionText(qDto.questionText())
+                            .questionType(qDto.questionType())
+                            .options(qDto.options())
+                            .isRequired(qDto.isRequired())
+                            .event(event)
+                            .build());
+                }
             }
+        } else {
+            event.getQuestions().clear();
         }
 
         Event updatedEvent = eventRepository.save(event);
 
-        // --- ÚJ: MÓDOSÍTÁS NAPLÓZÁSA ---
+        // NAPLÓZÁS
         auditLogService.logAction(
                 requesterEmail,
                 "EVENT_UPDATED",

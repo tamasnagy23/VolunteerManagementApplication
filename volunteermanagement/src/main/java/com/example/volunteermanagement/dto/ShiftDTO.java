@@ -7,6 +7,7 @@ public record ShiftDTO(
         Long id,
         Long workAreaId,
         String workAreaName,
+        String name,
         LocalDateTime startTime,
         LocalDateTime endTime,
         int maxVolunteers,

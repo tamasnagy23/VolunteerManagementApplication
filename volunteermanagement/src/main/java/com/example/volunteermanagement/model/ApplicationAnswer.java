@@ -2,6 +2,9 @@ package com.example.volunteermanagement.model;
 
 import com.fasterxml.jackson.annotation.JsonBackReference;
 import jakarta.persistence.*;
+// --- ÚJ IMPORTOK ---
+import org.hibernate.annotations.OnDelete;
+import org.hibernate.annotations.OnDeleteAction;
 import lombok.*;
 
 @Entity
@@ -17,11 +20,13 @@ public class ApplicationAnswer {
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "application_id", nullable = false)
+    @OnDelete(action = OnDeleteAction.CASCADE) // <-- ÚJ SOR: Ha törlik a jelentkezést, törlődik a válasz is
     @JsonBackReference
     private Application application;
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "question_id", nullable = false)
+    @OnDelete(action = OnDeleteAction.CASCADE) // <-- ÚJ SOR: Ha törlik a kérdést, törlődik a válasz is
     private EventQuestion question;
 
     @Column(columnDefinition = "TEXT")

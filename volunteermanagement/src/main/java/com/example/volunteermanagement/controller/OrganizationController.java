@@ -31,8 +31,10 @@ public class OrganizationController {
         return ResponseEntity.ok("Sikeresen jelentkeztél a szervezetbe!");
     }
 
+    // JAVÍTVA: A merev hasAnyRole helyett csak azt kérjük, hogy legyen bejelentkezve.
+    // A konkrét (SYS_ADMIN vagy OWNER/ORGANIZER) jogosultságot a Service ellenőrzi!
     @PutMapping("/{membershipId}/handle")
-    @PreAuthorize("hasAnyRole('SYS_ADMIN', 'ORGANIZER', 'OWNER')")
+    @PreAuthorize("isAuthenticated()")
     public ResponseEntity<?> handleApplication(
             @PathVariable Long membershipId,
             @RequestParam String status,
@@ -42,9 +44,9 @@ public class OrganizationController {
         return ResponseEntity.ok("Jelentkezés állapota frissítve.");
     }
 
-    // --- ÚJ: SZEREPKÖR MÓDOSÍTÁSA ---
+    // JAVÍTVA
     @PutMapping("/{orgId}/members/{userId}/role")
-    @PreAuthorize("hasAnyRole('SYS_ADMIN', 'OWNER', 'ORGANIZER')")
+    @PreAuthorize("isAuthenticated()")
     public ResponseEntity<?> updateMemberRole(
             @PathVariable Long orgId,
             @PathVariable Long userId,
@@ -61,19 +63,22 @@ public class OrganizationController {
         return ResponseEntity.ok("Sikeresen kiléptél.");
     }
 
+    // JAVÍTVA
     @DeleteMapping("/{orgId}/members/{userId}")
-    @PreAuthorize("hasAnyRole('SYS_ADMIN', 'ORGANIZER', 'OWNER')")
+    @PreAuthorize("isAuthenticated()")
     public ResponseEntity<?> removeMember(@PathVariable Long orgId, @PathVariable Long userId, Principal principal) {
         organizationService.removeMember(orgId, userId, principal.getName());
         return ResponseEntity.ok("Tag eltávolítva.");
     }
 
     @GetMapping("/applications/pending")
+    @PreAuthorize("isAuthenticated()")
     public ResponseEntity<List<PendingApplicationDTO>> getPendingApplications(Principal principal) {
         return ResponseEntity.ok(organizationService.getPendingApplications(principal.getName()));
     }
 
     @GetMapping("/applications/history")
+    @PreAuthorize("isAuthenticated()")
     public ResponseEntity<List<PendingApplicationDTO>> getHistory(Principal principal) {
         return ResponseEntity.ok(organizationService.getHistory(principal.getName()));
     }

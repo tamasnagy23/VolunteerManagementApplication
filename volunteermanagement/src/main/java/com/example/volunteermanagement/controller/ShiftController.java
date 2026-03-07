@@ -57,4 +57,15 @@ public class ShiftController {
             Principal principal) {
         return ResponseEntity.ok(shiftService.updateShift(shiftId, dto, principal.getName()));
     }
+
+    // --- ÚJ: Önkéntes visszajelzése (Elfogadás vagy Módosítás kérése) ---
+    @PutMapping("/assignments/{assignmentId}/status")
+    public ResponseEntity<Void> updateAssignmentStatus(
+            @PathVariable Long assignmentId,
+            @RequestBody com.example.volunteermanagement.dto.UpdateAssignmentStatusRequest request,
+            Principal principal) {
+
+        shiftService.updateAssignmentStatus(assignmentId, request, principal.getName());
+        return ResponseEntity.ok().build();
+    }
 }

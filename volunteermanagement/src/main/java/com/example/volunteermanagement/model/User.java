@@ -57,9 +57,9 @@ public class User implements UserDetails {
     // ----------------------------------------------------------------
 
     @Builder.Default
-    @ManyToMany(mappedBy = "volunteers")
+    @OneToMany(mappedBy = "user", cascade = CascadeType.ALL, orphanRemoval = true)
     @JsonIgnore // Fontos, hogy ne legyen végtelen ciklus
-    private List<Shift> shifts = new ArrayList<>();
+    private List<ShiftAssignment> shiftAssignments = new ArrayList<>();
 
     @Override
     public Collection<? extends GrantedAuthority> getAuthorities() {

@@ -66,4 +66,10 @@ public class EventController {
         // Feltételezve, hogy az EventService-ben van már ilyen, vagy lekérhető:
         return ResponseEntity.ok(eventService.getWorkAreasByEventId(id));
     }
+
+    // --- ÚJ: Az önkéntes saját műszakjainak lekérése a Naptárhoz ---
+    @GetMapping("/my-shifts")
+    public ResponseEntity<List<com.example.volunteermanagement.dto.MyShiftDTO>> getMyShifts(Principal principal) {
+        return ResponseEntity.ok(shiftService.getMyShifts(principal.getName()));
+    }
 }

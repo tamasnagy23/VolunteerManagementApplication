@@ -8,7 +8,7 @@ import {
     TableHead, TableRow, TableCell, TableBody, Checkbox, useMediaQuery, useTheme,
     FormControlLabel, Avatar, Card, CardContent, CardActions
 } from '@mui/material';
-import Grid from '@mui/material/Grid'; // JAVÍTVA GRID2-re
+import Grid from '@mui/material/Grid';
 import type { SelectChangeEvent } from '@mui/material';
 
 // Ikonok
@@ -108,37 +108,40 @@ export default function MyTeam() {
         } catch { alert("Hiba történt a módosításkor."); } finally { setUpdatingKey(null); }
     };
 
+    // --- JAVÍTVA: handleApplication URL ---
     const handleApplication = async (appId: number, status: 'APPROVED' | 'REJECTED') => {
         if (status === 'REJECTED') { setRejectTarget(appId); setRejectMessage(''); setRejectModalOpen(true); return; }
         try {
             setUpdatingKey(`app-${appId}`); setError('');
-            await api.put(`/organizations/applications/${appId}`, null, { params: { status } });
+            await api.put(`/organizations/${appId}/handle`, null, { params: { status } });
             await fetchTeamData();
         } catch { alert("Hiba a művelet során."); } finally { setUpdatingKey(null); }
     };
 
+    // --- JAVÍTVA: handleBulkApplication URL ---
     const handleBulkApplication = async (status: 'APPROVED' | 'REJECTED') => {
         if (status === 'REJECTED') { setRejectTarget('BULK'); setRejectMessage(''); setRejectModalOpen(true); return; }
         if (!window.confirm(`Biztosan elfogadod mind a(z) ${selectedIds.length} jelentkezőt?`)) return;
         try {
             setLoading(true);
-            await Promise.all(selectedIds.map(id => api.put(`/organizations/applications/${id}`, null, { params: { status } })));
+            await Promise.all(selectedIds.map(id => api.put(`/organizations/${id}/handle`, null, { params: { status } })));
             setSelectedIds([]); await fetchTeamData();
             alert("Sikeres tömeges elfogadás!");
         } catch { alert("Hiba a tömeges művelet során."); } finally { setLoading(false); }
     };
 
+    // --- JAVÍTVA: confirmRejection URL ---
     const confirmRejection = async () => {
         try {
             setLoading(true);
             if (rejectTarget === 'BULK') {
-                await Promise.all(selectedIds.map(id => api.put(`/organizations/applications/${id}`, null, { params: { status: 'REJECTED', rejectionMessage: rejectMessage.trim() || undefined } })));
+                await Promise.all(selectedIds.map(id => api.put(`/organizations/${id}/handle`, null, { params: { status: 'REJECTED', rejectionMessage: rejectMessage.trim() || undefined } })));
                 setSelectedIds([]);
             } else if (rejectTarget !== null) {
-                await api.put(`/organizations/applications/${rejectTarget}`, null, { params: { status: 'REJECTED', rejectionMessage: rejectMessage.trim() || undefined } });
+                await api.put(`/organizations/${rejectTarget}/handle`, null, { params: { status: 'REJECTED', rejectionMessage: rejectMessage.trim() || undefined } });
             }
             setRejectModalOpen(false); await fetchTeamData();
-        } catch { alert("Hiba történt."); } finally { setLoading(false); }
+        } catch { alert("Hiba történt az elutasítás során."); } finally { setLoading(false); }
     };
 
     const handleRemoveMember = async () => {
@@ -265,7 +268,7 @@ export default function MyTeam() {
 
             {error && <Alert severity="error" sx={{ mb: 3 }}>{error}</Alert>}
 
-            {/* JAVÍTOTT KATEGÓRIAVÁLASZTÓ MOBILRA */}
+            {/* KATEGÓRIAVÁLASZTÓ */}
             {isMobile ? (
                 <FormControl fullWidth sx={{ mb: 3 }}>
                     <Select
@@ -288,7 +291,7 @@ export default function MyTeam() {
                 </Box>
             )}
 
-            {/* BULK ACTIONS SÁV JAVÍTVA MOBILRA */}
+            {/* BULK ACTIONS SÁV */}
             {selectedIds.length > 0 && currentTab !== 2 && (
                 <Paper elevation={0} sx={{ mb: 3, p: 2, bgcolor: '#e3f2fd', borderRadius: 3, border: '1px solid #90caf9' }}>
                     <Typography variant="subtitle2" fontWeight="bold" color="info.dark" mb={1}>{selectedIds.length} elem kiválasztva</Typography>
@@ -354,7 +357,7 @@ export default function MyTeam() {
             {currentListLength === 0 ? (
                 <Paper sx={{ p: 5, textAlign: 'center', color: 'text.secondary', borderRadius: 3 }}>Nincs találat.</Paper>
             ) : currentTab === 2 ? (
-                // TÖRTÉNELEM (Mobilon Kártyák, Asztalin Táblázat)
+                // TÖRTÉNELEM
                 isMobile ? (
                     <Box display="flex" flexDirection="column" gap={2}>
                         {paginatedHistory.map((history) => (
@@ -401,7 +404,7 @@ export default function MyTeam() {
                     </TableContainer>
                 )
             ) : currentTab === 1 ? (
-                // FÜGGŐ JELENTKEZÉSEK (Mobilon Kártyák, Asztalin Táblázat)
+                // FÜGGŐ JELENTKEZÉSEK
                 isMobile ? (
                     <Box display="flex" flexDirection="column" gap={2}>
                         {paginatedApps.map((app) => (
@@ -454,7 +457,7 @@ export default function MyTeam() {
                     </TableContainer>
                 )
             ) : (
-                /* --- AKTÍV TAGOK (Grid2 Kártyás Design - Már eleve jó volt, csak javítottuk a Grid szinaktist) --- */
+                /* --- AKTÍV TAGOK --- */
                 <Grid container spacing={2}>
                     {paginatedUsers.map((user) => {
                         const visibleOrgs = user.organizations.filter(org => isSysAdmin || myDetailedProfile?.organizations.some(myOrg => myOrg.orgId === org.orgId));
@@ -526,7 +529,7 @@ export default function MyTeam() {
 
             {totalPages > 1 && <Box display="flex" justifyContent="center" mt={4}><Pagination count={totalPages} page={page} onChange={(_e, v) => setPage(v)} color="primary" size={isMobile ? "small" : "medium"} /></Box>}
 
-            {/* MODALOK (Ugyanaz maradt, csak mobilbarát margók) */}
+            {/* MODALOK */}
             <Dialog open={!!selectedUser} onClose={() => setSelectedUser(null)} maxWidth="sm" fullWidth PaperProps={{ sx: { m: { xs: 2, sm: 3 } } }}>
                 <DialogTitle sx={{ bgcolor: 'primary.main', color: 'white', fontWeight: 'bold' }}>Profil Részletek</DialogTitle>
                 <DialogContent dividers>
@@ -549,7 +552,6 @@ export default function MyTeam() {
                 <DialogActions sx={{ p: 2 }}><Button onClick={() => setSelectedUser(null)} variant="contained">Bezárás</Button></DialogActions>
             </Dialog>
 
-            {/* A TÖBBI MODAL (Törlés, Email, Elutasítás) ITT VAN, VÁLTOZATLANUL... */}
             <Dialog open={!!memberToDelete} onClose={() => setMemberToDelete(null)} maxWidth="xs" fullWidth>
                 <DialogTitle sx={{ fontWeight: 'bold', color: 'error.main' }}>Tag eltávolítása</DialogTitle>
                 <DialogContent><Typography>Biztosan eltávolítod <strong>{memberToDelete?.userName}</strong> nevű tagot innen: <strong>{memberToDelete?.orgName}</strong>?</Typography></DialogContent>

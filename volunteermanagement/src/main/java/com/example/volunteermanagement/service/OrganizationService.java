@@ -86,9 +86,19 @@ public class OrganizationService {
 
     @Transactional
     public void updateMemberRole(Long orgId, Long memberUserId, OrganizationRole newRole, String adminEmail) {
+        User admin = userRepository.findByEmail(adminEmail).orElseThrow();
         Organization org = organizationRepository.findById(orgId).orElseThrow();
-        User targetUser = userRepository.findById(memberUserId).orElseThrow();
 
+        // JAVÍTÁS: SYS_ADMIN jogosultság ellenőrzése
+        if (admin.getRole() != Role.SYS_ADMIN) {
+            OrganizationMember adminMembership = organizationMemberRepository.findByOrganizationAndUser(org, admin)
+                    .orElseThrow(() -> new RuntimeException("Nincs jogosultságod ebben a szervezetben!"));
+            if (adminMembership.getRole() != OrganizationRole.OWNER && adminMembership.getRole() != OrganizationRole.ORGANIZER) {
+                throw new RuntimeException("Csak vezető módosíthat szerepkört!");
+            }
+        }
+
+        User targetUser = userRepository.findById(memberUserId).orElseThrow();
         OrganizationMember member = organizationMemberRepository.findByOrganizationAndUser(org, targetUser)
                 .orElseThrow(() -> new RuntimeException("Tag nem található"));
 
@@ -127,13 +137,23 @@ public class OrganizationService {
         return pending.stream().map(this::mapMembershipToDTO).collect(Collectors.toList());
     }
 
-    // 4. Elbírálás (Javítva: Adatbázis naplózás hozzáadva)
+    // 4. Elbírálás
     @Transactional
     public void handleApplication(Long membershipId, String status, String rejectionMessage, String adminEmail) {
+        User admin = userRepository.findByEmail(adminEmail).orElseThrow();
         OrganizationMember member = organizationMemberRepository.findById(membershipId)
                 .orElseThrow(() -> new RuntimeException("Jelentkezés nem található"));
 
         Long orgId = member.getOrganization().getId();
+
+        // JAVÍTÁS: SYS_ADMIN jogosultság ellenőrzése
+        if (admin.getRole() != Role.SYS_ADMIN) {
+            OrganizationMember adminMembership = organizationMemberRepository.findByOrganizationAndUser(member.getOrganization(), admin)
+                    .orElseThrow(() -> new RuntimeException("Nincs jogosultságod ebben a szervezetben!"));
+            if (adminMembership.getRole() != OrganizationRole.OWNER && adminMembership.getRole() != OrganizationRole.ORGANIZER) {
+                throw new RuntimeException("Csak vezető bírálhat el jelentkezést!");
+            }
+        }
 
         if ("APPROVED".equalsIgnoreCase(status)) {
             member.setStatus(MembershipStatus.APPROVED);
@@ -169,17 +189,20 @@ public class OrganizationService {
         auditLogService.logAction(userEmail, "LEAVE_ORGANIZATION", "Szervezet ID: " + orgId, "A felhasználó kilépett a szervezetből.", orgId);
     }
 
-    // Tag eltávolítása (Javítva: 5 paraméteres naplózás)
+    // Tag eltávolítása
     @Transactional
     public void removeMember(Long orgId, Long memberUserId, String requesterEmail) {
         User requester = userRepository.findByEmail(requesterEmail).orElseThrow();
         Organization org = organizationRepository.findById(orgId).orElseThrow();
 
-        OrganizationMember requesterMembership = organizationMemberRepository.findByOrganizationAndUser(org, requester)
-                .orElseThrow(() -> new RuntimeException("Nincs jogosultságod!"));
+        // JAVÍTÁS: Ha a kérdező SYS_ADMIN, egyből továbbengedjük, nem keressük a saját tagságát
+        if (requester.getRole() != Role.SYS_ADMIN) {
+            OrganizationMember requesterMembership = organizationMemberRepository.findByOrganizationAndUser(org, requester)
+                    .orElseThrow(() -> new RuntimeException("Nincs jogosultságod!"));
 
-        if (requesterMembership.getRole() == OrganizationRole.VOLUNTEER && requester.getRole() != com.example.volunteermanagement.model.Role.SYS_ADMIN) {
-            throw new RuntimeException("Nincs jogosultságod!");
+            if (requesterMembership.getRole() == OrganizationRole.VOLUNTEER) {
+                throw new RuntimeException("Önkéntesek nem távolíthatnak el tagokat!");
+            }
         }
 
         User userToRemove = userRepository.findById(memberUserId).orElseThrow();
@@ -192,7 +215,6 @@ public class OrganizationService {
         memberToRemove.setStatus(MembershipStatus.REMOVED);
         organizationMemberRepository.save(memberToRemove);
 
-        // JAVÍTVA: 5 paraméter
         auditLogService.logAction(
                 requesterEmail,
                 "REMOVE_MEMBER",

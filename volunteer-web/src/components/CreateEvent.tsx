@@ -4,16 +4,21 @@ import {
     Box, Button, TextField, Typography, Container, Paper,
     IconButton, Divider, Alert, CircularProgress,
     Select, MenuItem, FormControl, InputLabel, Checkbox, FormControlLabel,
-    useMediaQuery, useTheme
+    useMediaQuery, useTheme, Dialog, DialogTitle, DialogContent, DialogActions,
+    List, ListItem, ListItemText
 } from '@mui/material';
-import Grid from '@mui/material/Grid'; // Grid2 használata
+import Grid from '@mui/material/Grid';
 import DeleteIcon from '@mui/icons-material/Delete';
 import AddCircleOutlineIcon from '@mui/icons-material/AddCircleOutline';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
+import EditIcon from '@mui/icons-material/Edit';
+import CheckIcon from '@mui/icons-material/Check';
+import CloseIcon from '@mui/icons-material/Close';
 import api from '../api/axios';
 import { useNavigate, useLocation, useParams } from 'react-router-dom';
 import axios from 'axios';
 
+// --- INTERFÉSZEK ---
 interface WorkAreaInput {
     id?: number;
     name: string;
@@ -29,6 +34,25 @@ interface EventQuestionInput {
     isRequired: boolean;
 }
 
+interface Organization {
+    id: number;
+    name: string;
+}
+
+interface UserProfile {
+    role: string;
+}
+
+// ÚJ: A beosztás interfésze a Modalhoz
+interface ShiftData {
+    id: number;
+    workAreaId: number;
+    workAreaName: string;
+    startTime: string;
+    endTime: string;
+    maxVolunteers: number;
+}
+
 export default function EventForm() {
     const { id } = useParams<{ id: string }>();
     const navigate = useNavigate();
@@ -37,11 +61,15 @@ export default function EventForm() {
     const isEditMode = !!id;
 
     const location = useLocation();
-    const passedOrgId = location.state?.selectedOrgId; // Itt kapjuk el a Dashboard-tól!
+    const passedOrgId = location.state?.selectedOrgId;
 
     const [error, setError] = useState('');
     const [loading, setLoading] = useState(false);
-    const [initialLoading, setInitialLoading] = useState(isEditMode);
+    const [initialLoading, setInitialLoading] = useState(true);
+
+    const [user, setUser] = useState<UserProfile | null>(null);
+    const [organizations, setOrganizations] = useState<Organization[]>([]);
+    const [selectedAdminOrgId, setSelectedAdminOrgId] = useState<number | ''>(passedOrgId || '');
 
     const [eventData, setEventData] = useState({
         title: '', description: '', location: '',
@@ -54,11 +82,27 @@ export default function EventForm() {
 
     const [questions, setQuestions] = useState<EventQuestionInput[]>([]);
 
+    // --- ÚJ: Ütközéskezelő Modal Állapotai ---
+    const [conflictModalOpen, setConflictModalOpen] = useState(false);
+    const [conflictingShifts, setConflictingShifts] = useState<ShiftData[]>([]);
+    const [editingShiftId, setEditingShiftId] = useState<number | null>(null);
+    const [shiftEditData, setShiftEditData] = useState({ startTime: '', endTime: '' });
+    const [shiftActionLoading, setShiftActionLoading] = useState(false);
+
     useEffect(() => {
-        if (isEditMode && id) {
-            api.get(`/events/${id}`)
-                .then(res => {
-                    const data = res.data;
+        const fetchInitialData = async () => {
+            try {
+                const userRes = await api.get('/users/me');
+                setUser(userRes.data);
+
+                if (userRes.data.role === 'SYS_ADMIN') {
+                    const orgsRes = await api.get('/organizations');
+                    setOrganizations(orgsRes.data);
+                }
+
+                if (isEditMode && id) {
+                    const eventRes = await api.get(`/events/${id}`);
+                    const data = eventRes.data;
                     setEventData({
                         title: data.title || '', description: data.description || '', location: data.location || '',
                         startTime: data.startTime ? data.startTime.substring(0, 16) : '',
@@ -76,10 +120,15 @@ export default function EventForm() {
                             id: q.id, questionText: q.questionText, questionType: q.questionType, options: q.options || '', isRequired: q.isRequired
                         })));
                     }
-                })
-                .catch(() => setError("Nem sikerült betölteni az eseményt."))
-                .finally(() => setInitialLoading(false));
-        }
+                }
+            } catch {
+                setError("Hiba az oldal betöltésekor. Lehet, hogy nincsenek megfelelő jogosultságaid.");
+            } finally {
+                setInitialLoading(false);
+            }
+        };
+
+        fetchInitialData();
     }, [id, isEditMode]);
 
     const handleEventChange = (e: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
@@ -94,11 +143,7 @@ export default function EventForm() {
     const addArea = () => setWorkAreas([...workAreas, { name: '', description: '', capacity: 5 }]);
     const removeArea = (index: number) => setWorkAreas(workAreas.filter((_, i) => i !== index));
 
-    const handleQuestionChange = (
-        index: number,
-        field: keyof EventQuestionInput,
-        value: string | boolean
-    ) => {
+    const handleQuestionChange = (index: number, field: keyof EventQuestionInput, value: string | boolean) => {
         const newQuestions = [...questions];
         newQuestions[index] = { ...newQuestions[index], [field]: value } as EventQuestionInput;
         if (field === 'questionType' && value === 'TEXT') newQuestions[index].options = '';
@@ -120,12 +165,55 @@ export default function EventForm() {
         }
     };
 
-    const handleSubmit = async (e: FormEvent) => {
-        e.preventDefault();
+    const fixDate = (dateStr: string) => dateStr.length === 16 ? dateStr + ":00" : dateStr;
+
+    // --- ÚJ: Műszakok ellenőrzése mentés előtt ---
+    const checkShiftConflicts = async () => {
+        if (!isEditMode || !id) return true; // Létrehozáskor nincsenek még műszakok
+
+        try {
+            const shiftsRes = await api.get(`/events/${id}/shifts`);
+            const shifts: ShiftData[] = shiftsRes.data;
+
+            const newEventStart = new Date(eventData.startTime).getTime();
+            const newEventEnd = new Date(eventData.endTime).getTime();
+
+            // Kikeressük azokat a műszakokat, amik kilógnak az új időkeretből
+            const conflicts = shifts.filter(s => {
+                const sStart = new Date(s.startTime).getTime();
+                const sEnd = new Date(s.endTime).getTime();
+                return sStart < newEventStart || sEnd > newEventEnd;
+            });
+
+            if (conflicts.length > 0) {
+                setConflictingShifts(conflicts);
+                setConflictModalOpen(true);
+                return false; // Megállítjuk a mentést!
+            }
+            return true; // Nincs ütközés
+        } catch (err) {
+            console.error("Hiba a műszakok ellenőrzésekor", err);
+            return true; // Ha hiba van a lekérdezésben, ráhagyjuk a Backend validációjára
+        }
+    };
+
+    const handleSubmit = async (e?: FormEvent) => {
+        if (e) e.preventDefault();
         setLoading(true);
         setError('');
 
-        const fixDate = (dateStr: string) => dateStr.length === 16 ? dateStr + ":00" : dateStr;
+        if (user?.role === 'SYS_ADMIN' && !isEditMode && selectedAdminOrgId === '') {
+            setError('Rendszergazdaként kötelező kiválasztanod, hogy melyik szervezet nevében hozod létre az eseményt!');
+            setLoading(false);
+            return;
+        }
+
+        // --- PRE-CHECK: Ellenőrizzük az ütközéseket ---
+        const canProceed = await checkShiftConflicts();
+        if (!canProceed) {
+            setLoading(false);
+            return; // A Modal kinyílt, megállunk.
+        }
 
         const payload = {
             ...eventData,
@@ -133,7 +221,9 @@ export default function EventForm() {
             endTime: fixDate(eventData.endTime),
             workAreas: workAreas,
             questions: questions,
-            organization: passedOrgId ? { id: passedOrgId } : null
+            organization: (user?.role === 'SYS_ADMIN' && selectedAdminOrgId !== '')
+                ? { id: selectedAdminOrgId }
+                : (passedOrgId ? { id: passedOrgId } : null)
         };
 
         try {
@@ -141,10 +231,52 @@ export default function EventForm() {
             else await api.post('/events', payload);
             navigate('/dashboard');
         } catch (err: unknown) {
-            if (axios.isAxiosError(err)) setError(err.response?.data?.message || 'Hiba történt a mentés során.');
+            if (axios.isAxiosError(err)) setError(err.response?.data?.message || err.response?.data || 'Hiba történt a mentés során.');
             else setError('Váratlan hiba történt.');
         } finally {
             setLoading(false);
+        }
+    };
+
+    // --- ÚJ: Műszak Törlése a Modalban ---
+    const handleModalDeleteShift = async (shiftId: number) => {
+        if (!window.confirm("Biztosan törlöd ezt az idősávot?")) return;
+        setShiftActionLoading(true);
+        try {
+            await api.delete(`/shifts/${shiftId}`);
+            // Kivesszük a listából, ha sikeres
+            const updatedConflicts = conflictingShifts.filter(s => s.id !== shiftId);
+            setConflictingShifts(updatedConflicts);
+            if (updatedConflicts.length === 0) setConflictModalOpen(false);
+        } catch {
+            alert("Hiba a műszak törlésekor.");
+        } finally {
+            setShiftActionLoading(false);
+        }
+    };
+
+    // --- ÚJ: Műszak Módosítása a Modalban ---
+    const handleModalSaveShift = async (shift: ShiftData) => {
+        setShiftActionLoading(true);
+        try {
+            const payload = {
+                startTime: fixDate(shiftEditData.startTime),
+                endTime: fixDate(shiftEditData.endTime),
+                maxVolunteers: shift.maxVolunteers
+            };
+            await api.put(`/shifts/${shift.id}`, payload);
+
+            // Ha sikeresen átírta, levesszük az ütközési listáról
+            const updatedConflicts = conflictingShifts.filter(s => s.id !== shift.id);
+            setConflictingShifts(updatedConflicts);
+            setEditingShiftId(null);
+
+            if (updatedConflicts.length === 0) setConflictModalOpen(false);
+        } catch (err: unknown) {
+            if (axios.isAxiosError(err)) alert(err.response?.data?.message || "Hiba az időpont mentésekor.");
+            else alert("Váratlan hiba történt.");
+        } finally {
+            setShiftActionLoading(false);
         }
     };
 
@@ -162,6 +294,31 @@ export default function EventForm() {
                 {error && <Alert severity="error" sx={{ mb: 3 }}>{error}</Alert>}
 
                 <form onSubmit={handleSubmit}>
+
+                    {user?.role === 'SYS_ADMIN' && !isEditMode && (
+                        <Alert severity="warning" sx={{ mb: 4, borderRadius: 2, bgcolor: '#fff4e5' }}>
+                            <Typography variant="subtitle2" fontWeight="bold" gutterBottom>
+                                👑 Rendszergazdai Mód
+                            </Typography>
+                            <Typography variant="body2" mb={2}>
+                                Mivel te látod az egész rendszert, ki kell választanod, hogy melyik csapat (Szervezet) alá akarod besorolni ezt az eseményt.
+                            </Typography>
+                            <FormControl fullWidth size="small" sx={{ bgcolor: 'white' }}>
+                                <InputLabel>Válaszd ki a szervezetet *</InputLabel>
+                                <Select
+                                    value={selectedAdminOrgId}
+                                    label="Válaszd ki a szervezetet *"
+                                    onChange={(e) => setSelectedAdminOrgId(Number(e.target.value))}
+                                    required
+                                >
+                                    {organizations.map(org => (
+                                        <MenuItem key={org.id} value={org.id}>{org.name}</MenuItem>
+                                    ))}
+                                </Select>
+                            </FormControl>
+                        </Alert>
+                    )}
+
                     {/* 1. ALAPADATOK */}
                     <Box sx={{ mb: 4 }}>
                         <Typography variant="subtitle1" color="primary" sx={{ mb: 2, fontWeight: 'bold', textTransform: 'uppercase' }}>1. Alapadatok</Typography>
@@ -190,7 +347,6 @@ export default function EventForm() {
                     <Box sx={{ mb: 4 }}>
                         <Box sx={{ display: 'flex', flexDirection: { xs: 'column', sm: 'row' }, justifyContent: 'space-between', alignItems: { xs: 'flex-start', sm: 'center' }, mb: 2, gap: 2 }}>
                             <Typography variant="subtitle1" color="primary" sx={{ fontWeight: 'bold', textTransform: 'uppercase' }}>2. Munkaterületek / Beosztások</Typography>
-                            {/* Asztali nézeten itt van a gomb */}
                             {!isMobile && (
                                 <Button startIcon={<AddCircleOutlineIcon />} onClick={addArea} variant="outlined" size="small">Terület hozzáadása</Button>
                             )}
@@ -198,7 +354,6 @@ export default function EventForm() {
 
                         {workAreas.map((area, index) => (
                             <Paper key={index} variant="outlined" sx={{ p: 2, mb: 2, bgcolor: '#fcfcfc', borderRadius: 2, position: 'relative' }}>
-                                {/* Törlés gomb a jobb felső sarokban mobilon is */}
                                 <IconButton
                                     color="error"
                                     onClick={() => removeArea(index)}
@@ -221,7 +376,6 @@ export default function EventForm() {
                                 </Grid>
                             </Paper>
                         ))}
-                        {/* Mobilon alulra kerül a hozzáadás gomb */}
                         {isMobile && (
                             <Button fullWidth startIcon={<AddCircleOutlineIcon />} onClick={addArea} variant="outlined" sx={{ mt: 1, borderStyle: 'dashed' }}>Új Munkaterület</Button>
                         )}
@@ -299,6 +453,131 @@ export default function EventForm() {
                     </Box>
                 </form>
             </Paper>
+
+            {/* --- ÚJ: ÜTKÖZÉSKEZELŐ MODAL --- */}
+            <Dialog
+                open={conflictModalOpen}
+                maxWidth="md"
+                fullWidth
+                PaperProps={{ sx: { borderRadius: 3 } }}
+                // Letiltjuk a mellékattintást, hogy a felhasználó ne tudja véletlenül bezárni
+                disableEscapeKeyDown
+            >
+                <DialogTitle sx={{ bgcolor: 'warning.main', color: 'white', fontWeight: 'bold' }}>
+                    ⚠️ Ütköző Beosztások Észlelve!
+                </DialogTitle>
+                <DialogContent sx={{ mt: 2 }}>
+                    <Alert severity="warning" sx={{ mb: 3 }}>
+                        Az Esemény új időpontja miatt az alábbi műszakok "kint maradtak" (kilógnak az eseményből).
+                        Kérlek, módosítsd az idejüket, vagy töröld őket, hogy el tudd menteni az eseményt!
+                    </Alert>
+
+                    <List sx={{ bgcolor: '#fbfbfb', borderRadius: 2, border: '1px solid #e0e0e0' }}>
+                        {conflictingShifts.map(shift => (
+                            <ListItem key={shift.id} divider sx={{ py: 2, display: 'flex', flexDirection: 'column', alignItems: 'stretch' }}>
+                                <Box display="flex" justifyContent="space-between" alignItems="center" width="100%">
+                                    <ListItemText
+                                        primary={<Typography fontWeight="bold" color="primary">{shift.workAreaName}</Typography>}
+                                        secondary={
+                                            <Typography variant="body2" color="text.secondary">
+                                                Eredeti idő: {new Date(shift.startTime).toLocaleString('hu-HU')} - {new Date(shift.endTime).toLocaleTimeString('hu-HU')}
+                                            </Typography>
+                                        }
+                                    />
+
+                                    <Box display="flex" gap={1}>
+                                        {editingShiftId !== shift.id && (
+                                            <Button
+                                                size="small"
+                                                variant="outlined"
+                                                startIcon={<EditIcon />}
+                                                onClick={() => {
+                                                    setEditingShiftId(shift.id);
+                                                    setShiftEditData({
+                                                        startTime: shift.startTime.substring(0, 16),
+                                                        endTime: shift.endTime.substring(0, 16)
+                                                    });
+                                                }}
+                                                disabled={shiftActionLoading}
+                                            >
+                                                Módosít
+                                            </Button>
+                                        )}
+                                        <Button
+                                            size="small"
+                                            variant="outlined"
+                                            color="error"
+                                            startIcon={<DeleteIcon />}
+                                            onClick={() => handleModalDeleteShift(shift.id)}
+                                            disabled={shiftActionLoading}
+                                        >
+                                            Töröl
+                                        </Button>
+                                    </Box>
+                                </Box>
+
+                                {/* INLINE EDIT SZEKCIÓ */}
+                                {editingShiftId === shift.id && (
+                                    <Paper elevation={0} sx={{ mt: 2, p: 2, bgcolor: '#e3f2fd', width: '100%', borderRadius: 2 }}>
+                                        <Grid container spacing={2} alignItems="center">
+                                            <Grid size={{xs: 12, sm: 5}}>
+                                                <TextField
+                                                    fullWidth size="small" type="datetime-local" label="Új Kezdés"
+                                                    InputLabelProps={{ shrink: true }}
+                                                    value={shiftEditData.startTime}
+                                                    onChange={e => setShiftEditData({...shiftEditData, startTime: e.target.value})}
+                                                    disabled={shiftActionLoading}
+                                                />
+                                            </Grid>
+                                            <Grid size={{xs: 12, sm: 5}}>
+                                                <TextField
+                                                    fullWidth size="small" type="datetime-local" label="Új Befejezés"
+                                                    InputLabelProps={{ shrink: true }}
+                                                    value={shiftEditData.endTime}
+                                                    onChange={e => setShiftEditData({...shiftEditData, endTime: e.target.value})}
+                                                    disabled={shiftActionLoading}
+                                                />
+                                            </Grid>
+                                            <Grid size={{xs: 12, sm: 2}} display="flex" gap={1}>
+                                                <IconButton color="success" onClick={() => handleModalSaveShift(shift)} disabled={shiftActionLoading}>
+                                                    <CheckIcon />
+                                                </IconButton>
+                                                <IconButton color="error" onClick={() => setEditingShiftId(null)} disabled={shiftActionLoading}>
+                                                    <CloseIcon />
+                                                </IconButton>
+                                            </Grid>
+                                        </Grid>
+                                    </Paper>
+                                )}
+                            </ListItem>
+                        ))}
+                        {conflictingShifts.length === 0 && (
+                            <ListItem>
+                                <Alert severity="success" sx={{ width: '100%' }}>Minden ütközést elhárítottál! Most már elmentheted az Eseményt!</Alert>
+                            </ListItem>
+                        )}
+                    </List>
+                </DialogContent>
+                <DialogActions sx={{ p: 2 }}>
+                    <Button
+                        onClick={() => setConflictModalOpen(false)}
+                        variant="outlined"
+                        color="inherit"
+                        disabled={shiftActionLoading}
+                    >
+                        Mégse
+                    </Button>
+                    <Button
+                        onClick={() => handleSubmit()}
+                        variant="contained"
+                        color="success"
+                        disabled={conflictingShifts.length > 0 || shiftActionLoading}
+                    >
+                        Mentés folytatása
+                    </Button>
+                </DialogActions>
+            </Dialog>
+
         </Container>
     );
 }
