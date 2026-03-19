@@ -15,16 +15,16 @@ import java.util.List;
 import java.util.stream.Collectors;
 
 @RestController
-@RequestMapping("/api/work-areas") // Megváltozott az útvonal!
+@RequestMapping("/api/work-areas")
 @RequiredArgsConstructor
 public class WorkAreaController {
 
     private final WorkAreaRepository workAreaRepository;
     private final EventRepository eventRepository;
 
-    // 1. Új terület hozzáadása egy meglévő eseményhez
+    // JAVÍTVA: Csak akkor vehet fel új területet az eseménybe, ha van rá esemény-jogosultsága!
     @PostMapping("/event/{eventId}")
-    @PreAuthorize("hasAnyAuthority('COORDINATOR', 'ORGANIZER', 'SYS_ADMIN')")
+    @PreAuthorize("@eventSecurity.hasPermission(authentication.name, #eventId, 'MANAGE_SHIFTS')")
     public ResponseEntity<?> createWorkArea(@PathVariable Long eventId, @RequestBody CreateWorkAreaRequest request) {
         Event event = eventRepository.findById(eventId)
                 .orElseThrow(() -> new RuntimeException("Esemény nem található"));
@@ -40,28 +40,18 @@ public class WorkAreaController {
         return ResponseEntity.ok("Munkaterület létrehozva!");
     }
 
-    // 2. Területek lekérése egy eseményhez
     @GetMapping("/event/{eventId}")
     public ResponseEntity<List<WorkAreaDTO>> getWorkAreasForEvent(@PathVariable Long eventId) {
         List<WorkArea> areas = workAreaRepository.findByEventId(eventId);
-
-        // DTO-vá alakítjuk, hogy a React könnyen fel tudja dolgozni
         List<WorkAreaDTO> dtos = areas.stream()
-                .map(area -> new WorkAreaDTO(
-                        area.getId(),
-                        area.getName(),
-                        area.getDescription(),
-                        area.getCapacity(),
-                        List.of()
-                ))
+                .map(area -> new WorkAreaDTO(area.getId(), area.getName(), area.getDescription(), area.getCapacity(), List.of()))
                 .collect(Collectors.toList());
-
         return ResponseEntity.ok(dtos);
     }
 
-    // 3. Terület törlése
+    // JAVÍTVA: Törlésnél kikeresi, hogy a munkaterület melyik Eventhez tartozik, és azt ellenőrzi
     @DeleteMapping("/{id}")
-    @PreAuthorize("hasAnyAuthority('ORGANIZER', 'SYS_ADMIN')")
+    @PreAuthorize("@eventSecurity.canManageWorkArea(authentication.name, #id)")
     public ResponseEntity<?> deleteWorkArea(@PathVariable Long id) {
         workAreaRepository.deleteById(id);
         return ResponseEntity.ok("Terület törölve!");

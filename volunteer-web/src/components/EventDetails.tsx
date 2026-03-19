@@ -7,11 +7,16 @@ import {
     FormControl, InputLabel, Select, MenuItem, FormGroup,
     useMediaQuery, useTheme, Chip
 } from '@mui/material';
-import Grid from '@mui/material/Grid'; // Grid2 importálva
+import Grid from '@mui/material/Grid';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import HowToRegIcon from '@mui/icons-material/HowToReg';
 import DeleteIcon from '@mui/icons-material/Delete';
 import RestoreIcon from '@mui/icons-material/Restore';
+// --- ÚJ IKONOK A GOMBOKHOZ ---
+import ManageAccountsIcon from '@mui/icons-material/ManageAccounts';
+import FormatListBulletedIcon from '@mui/icons-material/FormatListBulleted';
+import CalendarMonthIcon from '@mui/icons-material/CalendarMonth';
+
 import api from '../api/axios';
 import axios from 'axios';
 
@@ -52,16 +57,27 @@ interface UserApplication {
     rejectionMessage?: string;
 }
 
+// --- ÚJ INTERFÉSZ AZ ESEMÉNY JOGOSULTSÁGOKHOZ ---
+interface EventPermissions {
+    globalAdmin: boolean;
+    eventRole: string | null;
+    permissions: string[];
+    coordinatedWorkAreas: number[];
+}
+
 export default function EventDetails() {
     const { id } = useParams<{ id: string }>();
     const navigate = useNavigate();
     const theme = useTheme();
-    const isMobile = useMediaQuery(theme.breakpoints.down('sm')); // Reszponzív breakpoint
+    const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
 
     const [event, setEvent] = useState<EventData | null>(null);
     const [loading, setLoading] = useState<boolean>(true);
     const [error, setError] = useState<string | null>(null);
     const [myApplications, setMyApplications] = useState<UserApplication[]>([]);
+
+    // --- ÚJ ÁLLAPOT: Itt tároljuk, mit tehet meg az illető ---
+    const [permissions, setPermissions] = useState<EventPermissions | null>(null);
 
     const [openModal, setOpenModal] = useState(false);
     const [submitting, setSubmitting] = useState(false);
@@ -77,9 +93,21 @@ export default function EventDetails() {
         if (id) {
             fetchEventData();
             checkIfApplied();
+            fetchMyPermissions(); // <-- Hívjuk meg az új végpontot
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [id]);
+
+    // --- ÚJ FÜGGVÉNY: Jogosultságok lekérése ---
+    const fetchMyPermissions = async () => {
+        try {
+            const res = await api.get(`/events/${id}/my-permissions`);
+            setPermissions(res.data);
+        } catch {
+            console.error("Nem sikerült lekérni a jogosultságokat. Valószínűleg sima önkéntes.");
+            // Ha 404 jön vissza, az azt jelenti, hogy nem tagja a szervezőcsapatnak, ami teljesen normális!
+        }
+    };
 
     const fetchEventData = async () => {
         try {
@@ -209,6 +237,15 @@ export default function EventDetails() {
     if (loading) return <Box display="flex" justifyContent="center" mt={10}><CircularProgress /></Box>;
     if (!event) return <Container><Alert severity="error">Esemény nem található.</Alert></Container>;
 
+    // --- JOGOSULTSÁGI VÁLTOZÓK (Leegyszerűsítjük az if/elseeket) ---
+    const isGlobalAdmin = permissions?.globalAdmin;
+    const isOrganizer = permissions?.eventRole === 'ORGANIZER';
+    const canManageApps = isGlobalAdmin || isOrganizer || permissions?.permissions.includes('MANAGE_APPLICATIONS');
+    const canManageShifts = isGlobalAdmin || isOrganizer || permissions?.permissions.includes('MANAGE_SHIFTS') || (permissions?.coordinatedWorkAreas?.length || 0) > 0;
+
+    // Ha bármihez is van joga, megmutatjuk neki a "Szervezői panelt"
+    const hasAnyAdminRights = isGlobalAdmin || isOrganizer || canManageApps || canManageShifts;
+
     return (
         <Container maxWidth="lg" sx={{ mt: { xs: 2, md: 4 }, mb: 10 }}>
             <Button startIcon={<ArrowBackIcon />} onClick={() => navigate('/dashboard')} sx={{ mb: 2 }}>
@@ -216,6 +253,50 @@ export default function EventDetails() {
             </Button>
 
             {error && <Alert severity="error" sx={{ mb: 3 }}>{error}</Alert>}
+
+            {/* --- ÚJ: SZERVEZŐI VEZÉRLŐPULT (Csak annak, akinek van joga valamihez!) --- */}
+            {hasAnyAdminRights && (
+                <Paper elevation={0} sx={{ p: 2, mb: 4, bgcolor: '#e3f2fd', border: '1px solid #90caf9', borderRadius: 3 }}>
+                    <Typography variant="subtitle1" fontWeight="bold" color="primary.dark" mb={2}>
+                        Szervezői Vezérlőpult
+                    </Typography>
+                    <Box display="flex" gap={2} flexWrap="wrap">
+                        {(isGlobalAdmin || isOrganizer) && (
+                            <Button
+                                variant="contained"
+                                color="primary"
+                                startIcon={<ManageAccountsIcon />}
+                                onClick={() => navigate(`/events/${id}/team`)} // Ezt az oldalt fogjuk mindjárt megcsinálni!
+                            >
+                                Csapat & Jogosultságok
+                            </Button>
+                        )}
+
+                        {canManageApps && (
+                            <Button
+                                variant="contained"
+                                color="secondary"
+                                startIcon={<FormatListBulletedIcon />}
+                                onClick={() => navigate(`/events/${id}/applications`)}
+                            >
+                                Jelentkezések Elbírálása
+                            </Button>
+                        )}
+
+                        {canManageShifts && (
+                            <Button
+                                variant="outlined"
+                                color="primary"
+                                startIcon={<CalendarMonthIcon />}
+                                onClick={() => navigate(`/events/${id}/shifts`)}
+                                sx={{ bgcolor: 'white' }}
+                            >
+                                Naptár & Beosztás
+                            </Button>
+                        )}
+                    </Box>
+                </Paper>
+            )}
 
             {/* JELENTKEZÉSEID ÁLLAPOTA (JAVÍTOTT RESZPONZIVITÁS) */}
             {myApplications.length > 0 && (
@@ -234,7 +315,7 @@ export default function EventDetails() {
                             borderRadius: 2,
                             boxShadow: '0 2px 5px rgba(0,0,0,0.05)',
                             display: 'flex',
-                            flexDirection: { xs: 'column', sm: 'row' }, // Mobilon egymás alá
+                            flexDirection: { xs: 'column', sm: 'row' },
                             alignItems: { xs: 'flex-start', sm: 'center' },
                             justifyContent: 'space-between',
                             gap: 2
@@ -359,7 +440,7 @@ export default function EventDetails() {
                 </Grid>
             </Paper>
 
-            {/* --- JELENTKEZÉS MODAL (JAVÍTOTT MARGÓK MOBILON) --- */}
+            {/* --- JELENTKEZÉS MODAL --- */}
             <Dialog open={openModal} onClose={() => setOpenModal(false)} maxWidth="sm" fullWidth PaperProps={{ sx: { m: { xs: 2, sm: 3 }, borderRadius: 3 } }}>
                 <DialogTitle sx={{ fontWeight: 'bold', bgcolor: 'primary.main', color: 'white', fontSize: { xs: '1.1rem', sm: '1.25rem' } }}>
                     Jelentkezési Lap
@@ -449,7 +530,6 @@ export default function EventDetails() {
                     </Button>
                 </DialogActions>
             </Dialog>
-
         </Container>
     );
 }

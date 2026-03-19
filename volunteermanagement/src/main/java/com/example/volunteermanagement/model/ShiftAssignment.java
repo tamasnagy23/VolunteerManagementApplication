@@ -27,8 +27,13 @@ public class ShiftAssignment {
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
     @Builder.Default
-    private AssignmentStatus status = AssignmentStatus.PENDING; // Alapból függőben van!
+    private AssignmentStatus status = AssignmentStatus.PENDING;
 
     @Column(columnDefinition = "TEXT")
-    private String message; // Ha módosítást kér, ide írja
+    private String message;
+
+    // --- ÚJ: Jelzi, hogy ez az ember beugró (készenléti) ---
+    @Column(nullable = false)
+    @Builder.Default
+    private boolean isBackup = false;
 }

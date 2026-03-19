@@ -23,46 +23,59 @@ public class ShiftService {
     private final AuditLogService auditLogService;
     private final WorkAreaRepository workAreaRepository;
     private final UserRepository userRepository;
-    private final ShiftAssignmentRepository shiftAssignmentRepository; // ÚJ!
+    private final ShiftAssignmentRepository shiftAssignmentRepository;
+    private final EventRepository eventRepository;
 
     @Transactional(readOnly = true)
     public List<ShiftDTO> getShiftsByEvent(Long eventId) {
-        List<Shift> shifts = shiftRepository.findByEventId(eventId);
+        List<Shift> allShifts = shiftRepository.findAll();
+
+        List<Shift> shifts = allShifts.stream()
+                .filter(s -> s.getType() == ShiftType.PERSONAL ||
+                        (s.getWorkArea() != null && s.getWorkArea().getEvent().getId().equals(eventId)) ||
+                        (s.getEvent() != null && s.getEvent().getId().equals(eventId)))
+                .collect(Collectors.toList());
 
         return shifts.stream().map(shift -> {
-            List<AssignedUserDTO> assignedUsers = shift.getAssignments().stream() // JAVÍTVA
+            List<AssignedUserDTO> assignedUsers = shift.getAssignments().stream()
                     .map(assignment -> {
                         User user = assignment.getUser();
+
                         Long appId = applicationRepository.findByUserAndEventId(user, eventId).stream()
-                                .filter(app -> app.getAssignedWorkArea() != null &&
-                                        app.getAssignedWorkArea().getId().equals(shift.getWorkArea().getId()))
+                                .filter(app -> shift.getWorkArea() == null ||
+                                        (app.getAssignedWorkArea() != null && app.getAssignedWorkArea().getId().equals(shift.getWorkArea().getId())))
                                 .map(Application::getId)
                                 .findFirst()
-                                .orElse(null);
+                                .orElseGet(() -> applicationRepository.findByUserAndEventId(user, eventId).stream().map(Application::getId).findFirst().orElse(null));
 
                         return new AssignedUserDTO(
                                 appId,
                                 user.getId(),
                                 user.getName(),
-                                user.getEmail()
+                                user.getEmail(),
+                                assignment.getStatus().name(),
+                                assignment.getMessage(),
+                                assignment.isBackup() // ÚJ: Átküldjük a Reactnek, hogy ő beugró-e
                         );
                     })
                     .collect(Collectors.toList());
 
             return new ShiftDTO(
                     shift.getId(),
-                    shift.getWorkArea().getId(),
-                    shift.getWorkArea().getName(),
+                    shift.getWorkArea() != null ? shift.getWorkArea().getId() : null,
+                    shift.getWorkArea() != null ? shift.getWorkArea().getName() : (shift.getType() == ShiftType.PERSONAL ? "Személyes" : "Globális"),
                     shift.getName(),
                     shift.getStartTime(),
                     shift.getEndTime(),
                     shift.getMaxVolunteers(),
+                    shift.getMaxBackupVolunteers(), // ÚJ
+                    shift.getType() != null ? shift.getType().name() : "WORK",
+                    shift.getDescription(),
                     assignedUsers
             );
         }).collect(Collectors.toList());
     }
 
-    // --- ÚJ METÓDUS: ÖNKÉNTES SAJÁT NAPTÁRÁHOZ ---
     @Transactional(readOnly = true)
     public List<MyShiftDTO> getMyShifts(String userEmail) {
         User user = userRepository.findByEmail(userEmail)
@@ -72,29 +85,32 @@ public class ShiftService {
 
         return assignments.stream().map(assignment -> {
             Shift shift = assignment.getShift();
-            Event event = shift.getWorkArea().getEvent();
 
-            // Munkatársak kigyűjtése (kivéve saját maga)
+            String eventTitle = shift.getWorkArea() != null ? shift.getWorkArea().getEvent().getTitle() : (shift.getEvent() != null ? shift.getEvent().getTitle() : "Személyes naptár");
+            String workAreaName = shift.getWorkArea() != null ? shift.getWorkArea().getName() : (shift.getType() == ShiftType.MEETING ? "Globális Gyűlés" : "Személyes elfoglaltság");
+
             List<String> coWorkers = shift.getAssignments().stream()
                     .filter(a -> !a.getUser().getId().equals(user.getId()))
-                    .map(a -> a.getUser().getName())
+                    .map(a -> a.getUser().getName() + (a.isBackup() ? " (Beugró)" : "")) // ÚJ: Szépítés a MyShifts nézethez
                     .collect(Collectors.toList());
 
             return new MyShiftDTO(
                     assignment.getId(),
                     shift.getId(),
-                    event.getTitle(),
-                    shift.getWorkArea().getName(),
+                    eventTitle,
+                    workAreaName,
+                    shift.getName(),
                     shift.getStartTime().toString(),
                     shift.getEndTime().toString(),
                     assignment.getStatus().name(),
                     assignment.getMessage(),
+                    shift.getType() != null ? shift.getType().name() : "WORK",
+                    shift.getDescription(),
                     coWorkers
             );
         }).collect(Collectors.toList());
     }
 
-    // --- ÚJ METÓDUS: STÁTUSZ FRISSÍTÉSE (ELFOGADÁS / MÓDOSÍTÁS) ---
     @Transactional
     public void updateAssignmentStatus(Long assignmentId, UpdateAssignmentStatusRequest request, String userEmail) {
         User user = userRepository.findByEmail(userEmail)
@@ -112,127 +128,216 @@ public class ShiftService {
 
         shiftAssignmentRepository.save(assignment);
 
+        Long orgId = assignment.getShift().getEvent() != null ? assignment.getShift().getEvent().getOrganization().getId() : null;
+
         auditLogService.logAction(userEmail, "SHIFT_STATUS_UPDATE",
                 "Beosztás státusza módosítva: " + request.status(),
                 "Üzenet: " + request.message(),
-                assignment.getShift().getWorkArea().getEvent().getOrganization().getId());
+                orgId);
     }
 
+    // ÚJ: Átalakított beosztás metódus, ami kezeli a normál és a beugró önkénteseket is!
     @Transactional
     public void assignUsersToShift(Long shiftId, AssignShiftRequest request, String requesterEmail) {
         Shift shift = shiftRepository.findById(shiftId)
                 .orElseThrow(() -> new RuntimeException("Műszak nem található!"));
 
-        List<Application> applications = applicationRepository.findAllById(request.applicationIds());
+        // Kinyerjük a rendes és a beugró alkalmazásokat is
+        List<Application> normalApps = applicationRepository.findAllById(request.applicationIds());
+        List<Application> backupApps = applicationRepository.findAllById(request.backupApplicationIds());
 
-        boolean allApproved = applications.stream()
-                .allMatch(app -> app.getStatus() == ApplicationStatus.APPROVED);
-        if (!allApproved) {
+        List<Application> allApps = new ArrayList<>();
+        allApps.addAll(normalApps);
+        allApps.addAll(backupApps);
+
+        if (!allApps.stream().allMatch(app -> app.getStatus() == ApplicationStatus.APPROVED)) {
             throw new RuntimeException("Csak elfogadott jelentkezőket oszthatsz be!");
         }
 
-        if (shift.getAssignments().size() + applications.size() > shift.getMaxVolunteers()) { // JAVÍTVA
-            throw new RuntimeException("A műszak betelt!");
-        }
+        if (shift.getType() != ShiftType.MEETING) {
+            long currentNormal = shift.getAssignments().stream().filter(a -> !a.isBackup()).count();
+            if (currentNormal + normalApps.size() > shift.getMaxVolunteers()) {
+                throw new RuntimeException("A rendes műszak betelt!");
+            }
 
-        List<User> usersToAdd = applications.stream()
-                .map(Application::getUser)
-                .collect(Collectors.toList());
+            long currentBackup = shift.getAssignments().stream().filter(ShiftAssignment::isBackup).count();
+            if (currentBackup + backupApps.size() > shift.getMaxBackupVolunteers()) {
+                throw new RuntimeException("A beugró/készenléti létszámkeret betelt!");
+            }
+        }
 
         boolean isNight = isNightShift(shift.getStartTime(), shift.getEndTime());
 
-        for (User user : usersToAdd) {
-            // Időpont ütközés vizsgálata az új entitáson keresztül
-            List<ShiftAssignment> userAssignments = shiftAssignmentRepository.findByUser(user);
-
-            for (ShiftAssignment assignment : userAssignments) {
-                Shift existingShift = assignment.getShift();
-                boolean isOverlapping = existingShift.getStartTime().isBefore(shift.getEndTime()) &&
-                        existingShift.getEndTime().isAfter(shift.getStartTime());
-
-                if (isOverlapping) {
-                    throw new RuntimeException("Időpont ütközés! " + user.getName() +
-                            " már be van osztva máshova ebben az időszakban: " +
-                            existingShift.getWorkArea().getName() +
-                            " (" + existingShift.getStartTime().toLocalTime() + " - " +
-                            existingShift.getEndTime().toLocalTime() + ")");
-                }
-            }
-
-            if (isNight) {
-                if (user.getDateOfBirth() == null) {
-                    throw new RuntimeException("Munkajogi hiba: " + user.getName() +
-                            " profiljában nincs megadva születési dátum, így biztonsági okokból nem osztható be olyan műszakba, ami érinti az éjszakát (22:00-06:00)!");
-                }
-
-                LocalDate shiftDate = shift.getStartTime().toLocalDate();
-                int ageAtShift = Period.between(user.getDateOfBirth(), shiftDate).getYears();
-
-                if (ageAtShift < 18) {
-                    throw new RuntimeException("Munkajogi hiba: Kiskorú önkéntes (" + user.getName() +
-                            ", aki csak " + ageAtShift + " éves lesz a beosztás napján) nem osztható be olyan műszakba, ami érinti az éjszakát (22:00 - 06:00)!");
-                }
-            }
-
-            // --- JAVÍTVA: Új Assignment létrehozása ---
-            ShiftAssignment newAssignment = ShiftAssignment.builder()
-                    .shift(shift)
-                    .user(user)
-                    .status(AssignmentStatus.PENDING) // Alapból függőben van
-                    .build();
-
-            shift.getAssignments().add(newAssignment);
+        // Metódus egy ember ellenőrzésére és hozzáadására
+        for (Application app : normalApps) {
+            processAssignment(shift, app.getUser(), false, isNight);
+        }
+        for (Application app : backupApps) {
+            processAssignment(shift, app.getUser(), true, isNight);
         }
 
         shiftRepository.save(shift);
 
-        String userNames = usersToAdd.stream().map(User::getName).collect(Collectors.joining(", "));
-        Long orgId = shift.getWorkArea().getEvent().getOrganization().getId();
+        String normalNames = normalApps.stream().map(a -> a.getUser().getName()).collect(Collectors.joining(", "));
+        String backupNames = backupApps.stream().map(a -> a.getUser().getName()).collect(Collectors.joining(", "));
 
-        auditLogService.logAction(requesterEmail, "ASSIGN_SHIFT", "Műszak beosztás: " + shift.getWorkArea().getName(),
-                usersToAdd.size() + " fő beosztva: " + userNames, orgId);
+        Long orgId = shift.getEvent() != null ? shift.getEvent().getOrganization().getId() : null;
+        String areaName = shift.getWorkArea() != null ? shift.getWorkArea().getName() : "Globális Gyűlés";
+
+        String logMessage = normalApps.size() + " normál tag: " + normalNames;
+        if (!backupApps.isEmpty()) logMessage += " | " + backupApps.size() + " beugró: " + backupNames;
+
+        auditLogService.logAction(requesterEmail, "ASSIGN_SHIFT", "Beosztás: " + areaName, logMessage, orgId);
     }
+
+    // Segédmetódus a beosztáshoz, hogy ne ismételjük a kódot
+    private void processAssignment(Shift shift, User user, boolean isBackup, boolean isNight) {
+        List<ShiftAssignment> userAssignments = shiftAssignmentRepository.findByUser(user);
+
+        for (ShiftAssignment assignment : userAssignments) {
+            Shift existingShift = assignment.getShift();
+            boolean isOverlapping = existingShift.getStartTime().isBefore(shift.getEndTime()) &&
+                    existingShift.getEndTime().isAfter(shift.getStartTime());
+
+            if (isOverlapping) {
+                String areaName = existingShift.getWorkArea() != null ? existingShift.getWorkArea().getName() : "Más elfoglaltság";
+                throw new RuntimeException("Időpont ütközés! " + user.getName() +
+                        " már be van osztva máshova ebben az időszakban: " + areaName +
+                        " (" + existingShift.getStartTime().toLocalTime() + " - " +
+                        existingShift.getEndTime().toLocalTime() + ")");
+            }
+        }
+
+        if (isNight) {
+            if (user.getDateOfBirth() == null) {
+                throw new RuntimeException("Munkajogi hiba: " + user.getName() + " profiljában nincs megadva születési dátum!");
+            }
+            LocalDate shiftDate = shift.getStartTime().toLocalDate();
+            int ageAtShift = Period.between(user.getDateOfBirth(), shiftDate).getYears();
+            if (ageAtShift < 18) {
+                throw new RuntimeException("Munkajogi hiba: Kiskorú önkéntes (" + user.getName() + ") nem osztható be éjszakai műszakba!");
+            }
+        }
+
+        ShiftAssignment newAssignment = ShiftAssignment.builder()
+                .shift(shift)
+                .user(user)
+                .status(AssignmentStatus.PENDING)
+                .isBackup(isBackup) // ÚJ: Elmentjük, ha beugró!
+                .build();
+
+        shift.getAssignments().add(newAssignment);
+    }
+
 
     @Transactional
     public void removeUserFromShift(Long shiftId, Long applicationId, String requesterEmail) {
         Shift shift = shiftRepository.findById(shiftId).orElseThrow(() -> new RuntimeException("Műszak nem található!"));
         Application application = applicationRepository.findById(applicationId).orElseThrow(() -> new RuntimeException("Jelentkezés nem található!"));
 
-        // Kikeressük és töröljük a kapcsolótáblából
         ShiftAssignment assignment = shiftAssignmentRepository.findByShiftIdAndUserId(shiftId, application.getUser().getId())
                 .orElseThrow(() -> new RuntimeException("Ez az önkéntes nincs beosztva ebbe a műszakba!"));
 
         shift.getAssignments().remove(assignment);
         shiftAssignmentRepository.delete(assignment);
-
         shiftRepository.save(shift);
 
-        auditLogService.logAction(requesterEmail, "REMOVE_FROM_SHIFT", "Műszakból törölve: " + shift.getWorkArea().getName(),
-                "Eltávolított önkéntes: " + application.getUser().getName(), shift.getWorkArea().getEvent().getOrganization().getId());
+        Long orgId = shift.getEvent() != null ? shift.getEvent().getOrganization().getId() : null;
+        String areaName = shift.getWorkArea() != null ? shift.getWorkArea().getName() : "Globális Gyűlés";
+
+        auditLogService.logAction(requesterEmail, "REMOVE_FROM_SHIFT", "Törlés innen: " + areaName,
+                "Eltávolított önkéntes: " + application.getUser().getName(), orgId);
+    }
+
+    @Transactional
+    public ShiftDTO createGlobalShift(Long eventId, ShiftDTO dto, String requesterEmail) {
+        Event event = eventRepository.findById(eventId).orElseThrow(() -> new RuntimeException("Esemény nem található"));
+
+        Shift shift = Shift.builder()
+                .event(event)
+                .workArea(null)
+                .name(dto.name())
+                .startTime(dto.startTime())
+                .endTime(dto.endTime())
+                .maxVolunteers(dto.maxVolunteers())
+                .maxBackupVolunteers(0) // Globális gyűlésnél nem értelmezzük
+                .type(ShiftType.MEETING)
+                .description(dto.description())
+                .assignments(new ArrayList<>())
+                .build();
+
+        Shift saved = shiftRepository.save(shift);
+
+        auditLogService.logAction(requesterEmail, "CREATE_SHIFT", "Új Globális Gyűlés: " + dto.name(),
+                "Időpont: " + dto.startTime() + " - " + dto.endTime(), event.getOrganization().getId());
+
+        return new ShiftDTO(saved.getId(), null, "Globális", saved.getName(), saved.getStartTime(), saved.getEndTime(), saved.getMaxVolunteers(), saved.getMaxBackupVolunteers(), saved.getType().name(), saved.getDescription(), List.of());
     }
 
     @Transactional
     public ShiftDTO createShift(Long workAreaId, ShiftDTO dto, String requesterEmail) {
-        WorkArea workArea = workAreaRepository.findById(workAreaId)
-                .orElseThrow(() -> new RuntimeException("Munkaterület nem található"));
-
-        validateShiftTimes(dto.startTime(), dto.endTime(), workArea.getEvent());
+        WorkArea workArea = null;
+        if (workAreaId != null) {
+            workArea = workAreaRepository.findById(workAreaId)
+                    .orElseThrow(() -> new RuntimeException("Munkaterület nem található"));
+            validateShiftTimes(dto.startTime(), dto.endTime(), workArea.getEvent());
+        }
 
         Shift shift = Shift.builder()
+                .event(workArea.getEvent())
                 .workArea(workArea)
                 .name(dto.name())
                 .startTime(dto.startTime())
                 .endTime(dto.endTime())
                 .maxVolunteers(dto.maxVolunteers())
-                .assignments(new ArrayList<>()) // JAVÍTVA
+                .maxBackupVolunteers(dto.maxBackupVolunteers()) // ÚJ
+                .type(dto.type() != null ? ShiftType.valueOf(dto.type()) : ShiftType.WORK)
+                .description(dto.description())
+                .assignments(new ArrayList<>())
                 .build();
 
         Shift saved = shiftRepository.save(shift);
 
-        auditLogService.logAction(requesterEmail, "CREATE_SHIFT", "Új műszak: " + workArea.getName(),
-                "Időpont: " + dto.startTime() + " - " + dto.endTime() + " (Max: " + dto.maxVolunteers() + " fő)", workArea.getEvent().getOrganization().getId());
+        Long orgId = workArea != null ? workArea.getEvent().getOrganization().getId() : null;
+        String areaName = workArea != null ? workArea.getName() : "Globális";
 
-        return new ShiftDTO(saved.getId(), workAreaId, workArea.getName(), saved.getName(), saved.getStartTime(), saved.getEndTime(), saved.getMaxVolunteers(), List.of());
+        auditLogService.logAction(requesterEmail, "CREATE_SHIFT", "Új esemény: " + areaName,
+                "Időpont: " + dto.startTime() + " - " + dto.endTime() + " (Max: " + dto.maxVolunteers() + " fő, Beugró: " + dto.maxBackupVolunteers() + ")", orgId);
+
+        return new ShiftDTO(saved.getId(), workAreaId, areaName, saved.getName(), saved.getStartTime(), saved.getEndTime(), saved.getMaxVolunteers(), saved.getMaxBackupVolunteers(), saved.getType().name(), saved.getDescription(), List.of());
+    }
+
+    @Transactional
+    public ShiftDTO createPersonalShift(ShiftDTO dto, String userEmail) {
+        User user = userRepository.findByEmail(userEmail)
+                .orElseThrow(() -> new RuntimeException("Felhasználó nem található!"));
+
+        Shift shift = Shift.builder()
+                .name(null)
+                .description(dto.description())
+                .startTime(dto.startTime())
+                .endTime(dto.endTime())
+                .maxVolunteers(1)
+                .maxBackupVolunteers(0)
+                .type(ShiftType.PERSONAL)
+                .assignments(new ArrayList<>())
+                .build();
+
+        Shift savedShift = shiftRepository.save(shift);
+
+        ShiftAssignment assignment = ShiftAssignment.builder()
+                .shift(savedShift)
+                .user(user)
+                .status(AssignmentStatus.CONFIRMED)
+                .build();
+
+        shiftAssignmentRepository.save(assignment);
+        savedShift.getAssignments().add(assignment);
+
+        auditLogService.logAction(userEmail, "CREATE_PERSONAL_SHIFT", "Személyes elfoglaltság rögzítve",
+                "Megnevezés: " + dto.description() + " | Idő: " + dto.startTime(), null);
+
+        return new ShiftDTO(savedShift.getId(), null, "Személyes elfoglaltság", savedShift.getName(), savedShift.getStartTime(), savedShift.getEndTime(), savedShift.getMaxVolunteers(), savedShift.getMaxBackupVolunteers(), savedShift.getType().name(), savedShift.getDescription(), List.of());
     }
 
     @Transactional
@@ -240,7 +345,9 @@ public class ShiftService {
         Shift shift = shiftRepository.findById(shiftId)
                 .orElseThrow(() -> new RuntimeException("Műszak nem található"));
 
-        validateShiftTimes(dto.startTime(), dto.endTime(), shift.getWorkArea().getEvent());
+        if (shift.getWorkArea() != null) {
+            validateShiftTimes(dto.startTime(), dto.endTime(), shift.getWorkArea().getEvent());
+        }
 
         String oldStats = "Idő: " + shift.getStartTime() + " - " + shift.getEndTime() + " (Max: " + shift.getMaxVolunteers() + ")";
 
@@ -248,52 +355,79 @@ public class ShiftService {
         shift.setStartTime(dto.startTime());
         shift.setEndTime(dto.endTime());
         shift.setMaxVolunteers(dto.maxVolunteers());
+        shift.setMaxBackupVolunteers(dto.maxBackupVolunteers()); // ÚJ
+
+        if (dto.type() != null) shift.setType(ShiftType.valueOf(dto.type()));
+        if (dto.description() != null) shift.setDescription(dto.description());
 
         Shift updated = shiftRepository.save(shift);
 
-        auditLogService.logAction(requesterEmail, "UPDATE_SHIFT", "Műszak módosítva: " + shift.getWorkArea().getName(),
-                "Régi: " + oldStats + " -> Új: Idő: " + dto.startTime() + " - " + dto.endTime() + " (Max: " + dto.maxVolunteers() + ")", shift.getWorkArea().getEvent().getOrganization().getId());
+        Long orgId = updated.getEvent() != null ? updated.getEvent().getOrganization().getId() : null;
+        String areaName = updated.getWorkArea() != null ? updated.getWorkArea().getName() : "Globális Gyűlés";
 
-        return new ShiftDTO(updated.getId(), shift.getWorkArea().getId(), shift.getWorkArea().getName(), updated.getName(), updated.getStartTime(), updated.getEndTime(), updated.getMaxVolunteers(), List.of());
+        auditLogService.logAction(requesterEmail, "UPDATE_SHIFT", "Műszak/Gyűlés módosítva: " + areaName,
+                "Régi: " + oldStats + " -> Új: Idő: " + dto.startTime() + " - " + dto.endTime() + " (Max: " + dto.maxVolunteers() + ", Beugró: " + dto.maxBackupVolunteers() + ")", orgId);
+
+        return new ShiftDTO(updated.getId(), updated.getWorkArea() != null ? updated.getWorkArea().getId() : null, areaName, updated.getName(), updated.getStartTime(), updated.getEndTime(), updated.getMaxVolunteers(), updated.getMaxBackupVolunteers(), updated.getType().name(), updated.getDescription(), List.of());
     }
 
     @Transactional
-    public void deleteShift(Long shiftId, String requesterEmail) {
+    public void deleteShift(Long shiftId, String message, String requesterEmail) {
         Shift shift = shiftRepository.findById(shiftId).orElseThrow(() -> new RuntimeException("Műszak nem található"));
-        Long orgId = shift.getWorkArea().getEvent().getOrganization().getId();
-        String areaName = shift.getWorkArea().getName();
+
+        Long orgId = shift.getEvent() != null ? shift.getEvent().getOrganization().getId() : null;
+
+        if (shift.getType() == ShiftType.PERSONAL) {
+            String targetUser = shift.getAssignments().isEmpty() ? "Ismeretlen" : shift.getAssignments().get(0).getUser().getName();
+            auditLogService.logAction(requesterEmail, "DELETE_PERSONAL_SHIFT", "Szervező törölte egy önkéntes személyes eseményét: " + targetUser, "Szervezői indoklás: " + message, orgId);
+        } else {
+            String areaName = shift.getWorkArea() != null ? shift.getWorkArea().getName() : "Globális Gyűlés";
+            auditLogService.logAction(requesterEmail, "DELETE_SHIFT", "Műszak/Gyűlés törölve: " + areaName, "Az idősáv törlésre került.", orgId);
+        }
 
         shiftRepository.delete(shift);
-        auditLogService.logAction(requesterEmail, "DELETE_SHIFT", "Műszak törölve: " + areaName, "Az idősáv és minden hozzárendelt beosztás törlésre került.", orgId);
+    }
+
+    @Transactional
+    public void deletePersonalShift(Long shiftId, String userEmail) {
+        Shift shift = shiftRepository.findById(shiftId)
+                .orElseThrow(() -> new RuntimeException("Esemény nem található!"));
+
+        if (shift.getType() != ShiftType.PERSONAL) {
+            throw new RuntimeException("Csak személyes elfoglaltságot törölhetsz így!");
+        }
+
+        boolean isOwner = shift.getAssignments().stream()
+                .anyMatch(a -> a.getUser().getEmail().equals(userEmail));
+
+        if (!isOwner) {
+            throw new RuntimeException("Nincs jogosultságod ezt törölni!");
+        }
+
+        auditLogService.logAction(userEmail, "DELETE_PERSONAL_SHIFT", "Személyes elfoglaltság törölve az önkéntes által", "Megnevezés: " + shift.getDescription(), null);
+
+        shiftRepository.delete(shift);
     }
 
     private void validateShiftTimes(LocalDateTime startTime, LocalDateTime endTime, Event event) {
         if (startTime == null || endTime == null) {
             throw new RuntimeException("Kérlek, adj meg egy érvényes kezdési és befejezési időpontot a műszakhoz!");
         }
-
         if (!startTime.isBefore(endTime)) {
-            throw new RuntimeException("Érvénytelen időpontok: A műszak nem érhet véget hamarabb (vagy ugyanakkor), mint ahogy elkezdődik!");
+            throw new RuntimeException("Érvénytelen időpontok: A műszak nem érhet véget hamarabb, mint ahogy elkezdődik!");
         }
-
         if (startTime.isBefore(event.getStartTime()) || endTime.isAfter(event.getEndTime())) {
-            throw new RuntimeException("A műszak időpontja kilóg az esemény idejéből!\nAz esemény tartama: "
-                    + event.getStartTime().toLocalDate() + " " + event.getStartTime().toLocalTime() + " - "
-                    + event.getEndTime().toLocalDate() + " " + event.getEndTime().toLocalTime());
+            throw new RuntimeException("A műszak időpontja kilóg az esemény idejéből!");
         }
     }
 
     private boolean isNightShift(LocalDateTime start, LocalDateTime end) {
         LocalDateTime current = start;
-
         while (current.isBefore(end)) {
             int hour = current.getHour();
-            if (hour >= 22 || hour < 6) {
-                return true;
-            }
+            if (hour >= 22 || hour < 6) return true;
             current = current.plusMinutes(30);
         }
-
         return false;
     }
 }

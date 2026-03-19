@@ -52,4 +52,17 @@ public class WorkArea {
     @Builder.Default
     @JsonIgnore
     private List<Application> assignedApplications = new ArrayList<>();
+
+    // ... meglévő kód ...
+
+    // --- ÚJ: A Munkaterület Koordinátorai ---
+    @ManyToMany
+    @JoinTable(
+            name = "work_area_coordinators",
+            joinColumns = @JoinColumn(name = "work_area_id"),
+            inverseJoinColumns = @JoinColumn(name = "user_id")
+    )
+    @Builder.Default
+    @JsonIgnore
+    private List<User> coordinators = new ArrayList<>();
 }

@@ -51,11 +51,8 @@ public class Event {
     @JsonManagedReference
     private List<EventQuestion> questions = new ArrayList<>();
 
-    /*@OneToMany(mappedBy = "event", cascade = CascadeType.ALL, orphanRemoval = true)
-    private List<Shift> shifts = new ArrayList<>();*/
-
-    /*public void addShift(Shift shift) {
-        shifts.add(shift);
-        shift.setEvent(this);
-    }*/
+    @OneToMany(mappedBy = "event", cascade = CascadeType.ALL, orphanRemoval = true)
+    @Builder.Default
+    @JsonIgnore
+    private List<EventTeamMember> teamMembers = new ArrayList<>();
 }

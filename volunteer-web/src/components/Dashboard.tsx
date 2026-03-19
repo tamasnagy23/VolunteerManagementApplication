@@ -32,7 +32,7 @@ import EventCard from "./EventCard";
 // --- INTERFÉSZEK ---
 interface Shift { id: number; startTime: string; endTime: string; maxVolunteers: number; }
 interface Organization { id: number; name: string; address: string; description?: string; email?: string; phone?: string; }
-interface Event { id: number; title: string; description: string; location: string; shifts: Shift[]; organization?: Organization; }
+interface Event { id: number; title: string; description: string; location: string; startTime: string; endTime: string; shifts: Shift[]; organization?: Organization; }
 interface UserMembership { orgId?: number; orgName?: string; orgRole?: string; organization?: Organization; role?: string; status: string; rejectionMessage?: string; }
 interface UserProfile { name: string; role: string; memberships: UserMembership[]; }
 

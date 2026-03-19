@@ -90,4 +90,9 @@ public class User implements UserDetails {
     public int hashCode() {
         return Objects.hash(id);
     }
+
+    @Builder.Default
+    @OneToMany(mappedBy = "user", cascade = CascadeType.ALL, orphanRemoval = true)
+    @JsonIgnore
+    private List<EventTeamMember> eventRoles = new ArrayList<>();
 }

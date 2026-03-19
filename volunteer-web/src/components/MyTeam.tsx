@@ -22,6 +22,7 @@ import CancelIcon from '@mui/icons-material/Cancel';
 import VisibilityIcon from '@mui/icons-material/Visibility';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import EmailIcon from '@mui/icons-material/Email';
+import LightbulbIcon from '@mui/icons-material/Lightbulb';
 
 import api from '../api/axios';
 import * as XLSX from 'xlsx';
@@ -33,9 +34,10 @@ interface PendingApplication { id: number; userName: string; userEmail: string; 
 interface CurrentUser { role: string; email: string; }
 interface ExportRow { name: string; email: string; phone: string; org: string; role: string; status: string; reason?: string; }
 
-const ROLE_WEIGHTS: Record<string, number> = { 'OWNER': 4, 'ORGANIZER': 3, 'COORDINATOR': 2, 'VOLUNTEER': 1 };
-const ROLE_LABELS: Record<string, string> = { 'VOLUNTEER': 'Önkéntes', 'COORDINATOR': 'Koordinátor', 'ORGANIZER': 'Szervező', 'OWNER': 'Alapító' };
-const ROLE_COLORS: Record<string, "default" | "primary" | "secondary" | "error" | "info" | "success" | "warning"> = { 'VOLUNTEER': 'default', 'COORDINATOR': 'info', 'ORGANIZER': 'secondary', 'OWNER': 'error' };
+// JAVÍTÁS: Kikerült a COORDINATOR, és a Szervezőből "Globális Szervező" lett
+const ROLE_WEIGHTS: Record<string, number> = { 'OWNER': 3, 'ORGANIZER': 2, 'VOLUNTEER': 1 };
+const ROLE_LABELS: Record<string, string> = { 'VOLUNTEER': 'Önkéntes', 'ORGANIZER': 'Globális Szervező', 'OWNER': 'Alapító' };
+const ROLE_COLORS: Record<string, "default" | "primary" | "secondary" | "error" | "info" | "success" | "warning"> = { 'VOLUNTEER': 'default', 'ORGANIZER': 'secondary', 'OWNER': 'error' };
 
 export default function MyTeam() {
     const navigate = useNavigate();
@@ -87,9 +89,14 @@ export default function MyTeam() {
                 api.get<PendingApplication[]>('/organizations/applications/history').catch(() => ({ data: [] }))
             ]);
             setCurrentUser(meRes.data);
-            setUsers(teamRes.data);
-            setPendingApps(appsRes.data);
-            setHistoryApps(historyRes.data);
+
+            // JAVÍTÁS: Kiszűrjük a törölt (anonimizált) felhasználókat MINDEGYIK listából!
+            const isNotDeleted = (email: string) => !email.endsWith('@anonymized.local');
+
+            setUsers(teamRes.data.filter(u => isNotDeleted(u.email)));
+            setPendingApps(appsRes.data.filter(app => isNotDeleted(app.userEmail)));
+            setHistoryApps(historyRes.data.filter(app => isNotDeleted(app.userEmail)));
+
         } catch {
             setError("Nem sikerült betölteni a csapat adatait.");
         } finally {
@@ -108,7 +115,6 @@ export default function MyTeam() {
         } catch { alert("Hiba történt a módosításkor."); } finally { setUpdatingKey(null); }
     };
 
-    // --- JAVÍTVA: handleApplication URL ---
     const handleApplication = async (appId: number, status: 'APPROVED' | 'REJECTED') => {
         if (status === 'REJECTED') { setRejectTarget(appId); setRejectMessage(''); setRejectModalOpen(true); return; }
         try {
@@ -118,7 +124,6 @@ export default function MyTeam() {
         } catch { alert("Hiba a művelet során."); } finally { setUpdatingKey(null); }
     };
 
-    // --- JAVÍTVA: handleBulkApplication URL ---
     const handleBulkApplication = async (status: 'APPROVED' | 'REJECTED') => {
         if (status === 'REJECTED') { setRejectTarget('BULK'); setRejectMessage(''); setRejectModalOpen(true); return; }
         if (!window.confirm(`Biztosan elfogadod mind a(z) ${selectedIds.length} jelentkezőt?`)) return;
@@ -130,7 +135,6 @@ export default function MyTeam() {
         } catch { alert("Hiba a tömeges művelet során."); } finally { setLoading(false); }
     };
 
-    // --- JAVÍTVA: confirmRejection URL ---
     const confirmRejection = async () => {
         try {
             setLoading(true);
@@ -291,6 +295,23 @@ export default function MyTeam() {
                 </Box>
             )}
 
+            {/* ÚJ: INFORMATÍV BANNER AZ AKTÍV TAGOK FÜLÖN */}
+            {currentTab === 0 && (
+                <Alert
+                    severity="info"
+                    icon={<LightbulbIcon />}
+                    sx={{ mb: 3, borderRadius: 2, border: '1px solid', borderColor: 'info.light', bgcolor: '#f8fbff' }}
+                >
+                    <Typography variant="subtitle2" fontWeight="bold" color="info.dark">
+                        💡 Tipp a csapatkezeléshez: A kétszintű rendszer
+                    </Typography>
+                    <Typography variant="body2" mt={0.5} color="text.secondary">
+                        Akinek itt <strong>"Globális Szervező"</strong> rangot adsz, az a szervezet <em>összes</em> eseményét látni és szerkeszteni fogja.
+                        Ha valakire csak egy <em>konkrét</em> esemény vezetését bíznád rá, hagyd itt <strong>"Önkéntes"</strong> státuszban, és az adott Esemény "Csapat" fülén nevezd ki <strong>Koordinátornak</strong>!
+                    </Typography>
+                </Alert>
+            )}
+
             {/* BULK ACTIONS SÁV */}
             {selectedIds.length > 0 && currentTab !== 2 && (
                 <Paper elevation={0} sx={{ mb: 3, p: 2, bgcolor: '#e3f2fd', borderRadius: 3, border: '1px solid #90caf9' }}>
@@ -329,8 +350,7 @@ export default function MyTeam() {
                             <InputLabel>Szerepkör</InputLabel>
                             <Select value={roleFilter} label="Szerepkör" onChange={(e) => setRoleFilter(e.target.value)}>
                                 <MenuItem value="ALL">Minden szerepkör</MenuItem>
-                                <MenuItem value="ORGANIZER">Szervező</MenuItem>
-                                <MenuItem value="COORDINATOR">Koordinátor</MenuItem>
+                                <MenuItem value="ORGANIZER">Globális Szervező</MenuItem>
                                 <MenuItem value="VOLUNTEER">Önkéntes</MenuItem>
                             </Select>
                         </FormControl>
@@ -503,8 +523,7 @@ export default function MyTeam() {
                                                                         )}
                                                                     >
                                                                         <MenuItem value="VOLUNTEER">Önkéntes</MenuItem>
-                                                                        <MenuItem value="COORDINATOR">Koordinátor</MenuItem>
-                                                                        <MenuItem value="ORGANIZER">Szervező</MenuItem>
+                                                                        <MenuItem value="ORGANIZER">Globális Szervező</MenuItem>
                                                                         <MenuItem value="OWNER" disabled>Alapító</MenuItem>
                                                                     </Select>
                                                                 </FormControl>

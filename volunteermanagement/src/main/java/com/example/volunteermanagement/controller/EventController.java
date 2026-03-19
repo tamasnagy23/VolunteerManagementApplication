@@ -1,10 +1,13 @@
 package com.example.volunteermanagement.controller;
 
 import com.example.volunteermanagement.dto.EventDTO;
+import com.example.volunteermanagement.service.EventSecurityService;
+import com.example.volunteermanagement.dto.EventPermissionsDTO;
 import com.example.volunteermanagement.dto.ShiftDTO;
 import com.example.volunteermanagement.dto.WorkAreaDTO;
 import com.example.volunteermanagement.model.Event;
 import com.example.volunteermanagement.service.EventService;
+import com.example.volunteermanagement.service.EventTeamService;
 import com.example.volunteermanagement.service.ShiftService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -12,6 +15,7 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import java.security.Principal;
@@ -27,7 +31,15 @@ public class EventController {
     @Autowired
     private ShiftService shiftService;
 
+    @Autowired
+    private EventSecurityService eventSecurityService;
+
+    @Autowired
+    private EventTeamService eventTeamService;
+
     @PostMapping
+    // OKOS ZÁR: Csak a szervezet jogosult tagjai hozhatnak létre eseményt!
+    @PreAuthorize("@eventSecurity.canCreateEventForOrg(authentication.name, #eventDTO.organizationId)")
     public ResponseEntity<EventDTO> createEvent(@RequestBody EventDTO eventDTO, Principal principal) {
         Event createdEvent = eventService.createEventWithWorkAreas(eventDTO, principal.getName());
         return ResponseEntity.status(HttpStatus.CREATED).body(eventService.getEventDTOById(createdEvent.getId()));
@@ -45,12 +57,14 @@ public class EventController {
 
     // --- JAVÍTVA: Principal hozzáadva a módosításhoz ---
     @PutMapping("/{id}")
+    @PreAuthorize("@eventSecurity.hasPermission(authentication.name, #id, 'EDIT_EVENT_DETAILS')")
     public ResponseEntity<Event> updateEvent(@PathVariable Long id, @RequestBody EventDTO eventDTO, Principal principal) {
         return ResponseEntity.ok(eventService.updateEvent(id, eventDTO, principal.getName()));
     }
 
     // --- JAVÍTVA: Principal hozzáadva a törléshez ---
     @DeleteMapping("/{id}")
+    @PreAuthorize("@eventSecurity.hasPermission(authentication.name, #id, 'EDIT_EVENT_DETAILS')")
     public ResponseEntity<Void> deleteEvent(@PathVariable Long id, Principal principal) {
         eventService.deleteEvent(id, principal.getName());
         return ResponseEntity.noContent().build();
@@ -71,5 +85,37 @@ public class EventController {
     @GetMapping("/my-shifts")
     public ResponseEntity<List<com.example.volunteermanagement.dto.MyShiftDTO>> getMyShifts(Principal principal) {
         return ResponseEntity.ok(shiftService.getMyShifts(principal.getName()));
+    }
+
+    @GetMapping("/{eventId}/my-permissions")
+    public ResponseEntity<EventPermissionsDTO> getMyEventPermissions(
+            @PathVariable Long eventId,
+            Principal principal) {
+
+        EventPermissionsDTO permissions = eventSecurityService.getMyPermissionsForEvent(principal.getName(), eventId);
+        if (permissions == null) {
+            return ResponseEntity.notFound().build();
+        }
+        return ResponseEntity.ok(permissions);
+    }
+
+    // --- ÚJ: Esemény szintű csapat lekérése ---
+    @GetMapping("/{eventId}/team")
+    @PreAuthorize("@eventSecurity.canManageEventTeam(authentication.name, #eventId)")
+    public ResponseEntity<List<com.example.volunteermanagement.dto.EventTeamMemberDTO>> getEventTeam(@PathVariable Long eventId) {
+        return ResponseEntity.ok(eventTeamService.getEventTeam(eventId));
+    }
+
+    // --- ÚJ: Esemény szintű csapat tagjának módosítása (Mátrix mentés) ---
+    @PutMapping("/{eventId}/team/{userId}")
+    @PreAuthorize("@eventSecurity.canManageEventTeam(authentication.name, #eventId)")
+    public ResponseEntity<Void> updateEventTeamMember(
+            @PathVariable Long eventId,
+            @PathVariable Long userId,
+            @RequestBody com.example.volunteermanagement.dto.UpdateEventTeamMemberRequest request,
+            Principal principal) {
+
+        eventTeamService.updateEventTeamMember(eventId, userId, request, principal.getName());
+        return ResponseEntity.ok().build();
     }
 }

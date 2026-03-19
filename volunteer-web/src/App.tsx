@@ -11,7 +11,8 @@ import ManageApplications from "./components/ManageApplications.tsx";
 import Layout from './components/Layout';
 import Profile from "./components/Profile.tsx";
 import SystemLogs from "./components/SystemLogs.tsx";
-import ShiftManager from "./components/ShiftManager.tsx"; // <--- 1. ÚJ IMPORT (Ellenőrizd az elérési utat!)
+import ShiftManager from "./components/ShiftManager.tsx";
+import EventTeamManager from "./components/EventTeamManager.tsx"; // <--- 1. ÚJ IMPORT (Ellenőrizd az elérési utat!)
 
 function App() {
     return (
@@ -37,6 +38,7 @@ function App() {
                     <Route path="/profile" element={<Profile />} />
                     <Route path="/logs" element={<SystemLogs />} />
                     <Route path="/events/:id/shifts" element={<ShiftManager />} />
+                    <Route path="/events/:id/team" element={<EventTeamManager />} />
                 </Route>
 
             </Routes>

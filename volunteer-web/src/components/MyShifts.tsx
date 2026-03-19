@@ -7,6 +7,7 @@ import {
     useTheme, useMediaQuery, Popover, InputAdornment
 } from '@mui/material';
 import { useNavigate } from 'react-router-dom';
+
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import CalendarMonthIcon from '@mui/icons-material/CalendarMonth';
 import FormatListBulletedIcon from '@mui/icons-material/FormatListBulleted';
@@ -14,10 +15,15 @@ import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
 import HelpOutlineIcon from '@mui/icons-material/HelpOutline';
 import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
 import ChevronRightIcon from '@mui/icons-material/ChevronRight';
+import BlockIcon from '@mui/icons-material/Block';
+import RecordVoiceOverIcon from '@mui/icons-material/RecordVoiceOver';
+import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
+import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
+import AddIcon from '@mui/icons-material/Add'; // <-- ÚJ IMPORT
+import EditIcon from '@mui/icons-material/Edit'; // <-- ÚJ IMPORT
 
-// Naptár és Típus importok
 import { Calendar, dateFnsLocalizer } from 'react-big-calendar';
-import type { Event as CalendarEvent, View, ToolbarProps } from 'react-big-calendar';
+import type { Event as CalendarEvent, View, ToolbarProps, SlotInfo } from 'react-big-calendar';
 
 import {
     format, parse, startOfWeek, getDay, startOfMonth, endOfMonth,
@@ -37,11 +43,14 @@ interface MyShiftDTO {
     assignmentId: number;
     shiftId: number;
     eventName: string;
-    workAreaName: string;
+    workAreaName: string | null;
+    shiftName: string | null;
     startTime: string;
     endTime: string;
     status: 'PENDING' | 'CONFIRMED' | 'MODIFICATION_REQUESTED';
     message?: string;
+    type?: 'WORK' | 'MEETING' | 'PERSONAL';
+    description?: string;
     coWorkers: string[];
 }
 
@@ -49,21 +58,22 @@ interface ShiftCalendarEvent extends CalendarEvent {
     resource: MyShiftDTO;
 }
 
-// --- ASZTALI NAPTÁR FEJLÉC ---
-const CustomToolbar = (toolbar: ToolbarProps<ShiftCalendarEvent>) => {
-    const goToBack = () => toolbar.onNavigate('PREV');
-    const goToNext = () => toolbar.onNavigate('NEXT');
-    const goToCurrent = () => toolbar.onNavigate('TODAY');
+// Dátum konvertáló segédfüggvény az input mezőkhöz
+const toLocalISO = (date: Date) => {
+    const pad = (n: number) => String(n).padStart(2, '0');
+    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+};
 
+const CustomToolbar = (toolbar: ToolbarProps<ShiftCalendarEvent>) => {
     return (
         <Box display="flex" flexWrap="wrap" justifyContent="space-between" alignItems="center" mb={3} gap={2}>
-            <Button variant="outlined" onClick={goToCurrent} size="small" sx={{ fontWeight: 'bold' }}>Ma</Button>
+            <Button variant="outlined" onClick={() => toolbar.onNavigate('TODAY')} size="small" sx={{ fontWeight: 'bold' }}>Ma</Button>
             <Box display="flex" alignItems="center" gap={1}>
-                <IconButton onClick={goToBack} color="primary" sx={{ bgcolor: '#f1f5f9' }}><ChevronLeftIcon /></IconButton>
+                <IconButton onClick={() => toolbar.onNavigate('PREV')} color="primary" sx={{ bgcolor: '#f1f5f9' }}><ChevronLeftIcon /></IconButton>
                 <Typography variant="h6" fontWeight="bold" sx={{ minWidth: 160, textAlign: 'center', textTransform: 'capitalize' }}>
                     {toolbar.label}
                 </Typography>
-                <IconButton onClick={goToNext} color="primary" sx={{ bgcolor: '#f1f5f9' }}><ChevronRightIcon /></IconButton>
+                <IconButton onClick={() => toolbar.onNavigate('NEXT')} color="primary" sx={{ bgcolor: '#f1f5f9' }}><ChevronRightIcon /></IconButton>
             </Box>
             <ToggleButtonGroup value={toolbar.view} exclusive onChange={(_, newView) => newView && toolbar.onView(newView)} size="small">
                 <ToggleButton value="month">Hónap</ToggleButton>
@@ -87,7 +97,6 @@ export default function MyShifts() {
     const [listPage, setListPage] = useState(1);
     const ITEMS_PER_PAGE = 5;
 
-    // PRÉMIUM HÓNAPVÁLASZTÓ ÁLLAPOTAI
     const [monthPickerAnchor, setMonthPickerAnchor] = useState<HTMLDivElement | null>(null);
     const [pickerYear, setPickerYear] = useState(currentDate.getFullYear());
     const monthNames = ['Január', 'Február', 'Március', 'Április', 'Május', 'Június', 'Július', 'Augusztus', 'Szeptember', 'Október', 'November', 'December'];
@@ -102,6 +111,12 @@ export default function MyShifts() {
     const [changeMessage, setChangeMessage] = useState('');
     const [actionLoading, setActionLoading] = useState(false);
 
+    // --- ÚJ: Szerkesztési állapotok a személyes elfoglaltsághoz ---
+    const [personalModalOpen, setPersonalModalOpen] = useState(false);
+    const [isEditingPersonal, setIsEditingPersonal] = useState(false);
+    const [editingPersonalId, setEditingPersonalId] = useState<number | null>(null);
+    const [personalData, setPersonalData] = useState({ name: '', startTime: '', endTime: '' });
+
     useEffect(() => {
         fetchMyShifts();
         // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -115,22 +130,18 @@ export default function MyShifts() {
         try {
             setLoading(true);
             const response = await api.get('/events/my-shifts');
-            const fetchedShifts: MyShiftDTO[] = response.data;
-            setShifts(fetchedShifts);
-
-            if (fetchedShifts.length > 0) {
+            setShifts(response.data);
+            if (response.data.length > 0) {
                 const now = new Date().getTime();
-                const upcomingShifts = fetchedShifts.filter(s => new Date(s.endTime).getTime() > now);
+                const upcomingShifts = response.data.filter((s: MyShiftDTO) => new Date(s.endTime).getTime() > now);
                 if (upcomingShifts.length > 0) {
-                    const sortedUpcoming = upcomingShifts.sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime());
-                    setCurrentDate(new Date(sortedUpcoming[0].startTime));
+                    setCurrentDate(new Date(upcomingShifts.sort((a: MyShiftDTO, b: MyShiftDTO) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime())[0].startTime));
                 } else {
-                    const sortedPast = [...fetchedShifts].sort((a, b) => new Date(b.startTime).getTime() - new Date(a.startTime).getTime());
-                    setCurrentDate(new Date(sortedPast[0].startTime));
+                    setCurrentDate(new Date([...response.data].sort((a: MyShiftDTO, b: MyShiftDTO) => new Date(b.startTime).getTime() - new Date(a.startTime).getTime())[0].startTime));
                 }
             }
         } catch (error) {
-            console.error("Hiba a műszakok betöltésekor:", error);
+            console.error(error);
         } finally {
             setLoading(false);
         }
@@ -142,6 +153,16 @@ export default function MyShifts() {
         if (selectedEventFilter === 'all') return shifts;
         return shifts.filter(s => s.eventName === selectedEventFilter);
     }, [shifts, selectedEventFilter]);
+
+    const shiftsByDay = useMemo(() => {
+        const map = new Map<string, MyShiftDTO[]>();
+        filteredShifts.forEach(shift => {
+            const dateKey = format(new Date(shift.startTime), 'yyyy-MM-dd');
+            if (!map.has(dateKey)) map.set(dateKey, []);
+            map.get(dateKey)!.push(shift);
+        });
+        return map;
+    }, [filteredShifts]);
 
     const finalShiftsForList = useMemo(() => {
         return filteredShifts.filter(s => {
@@ -155,18 +176,34 @@ export default function MyShifts() {
         return finalShiftsForList.slice(startIndex, startIndex + ITEMS_PER_PAGE);
     }, [finalShiftsForList, listPage]);
 
-    const calendarEvents: ShiftCalendarEvent[] = filteredShifts.map(shift => ({
-        title: `${shift.workAreaName} (${shift.eventName})`,
-        start: new Date(shift.startTime),
-        end: new Date(shift.endTime),
-        resource: shift
-    }));
+    const calendarEvents = useMemo<ShiftCalendarEvent[]>(() => {
+        return filteredShifts.map(shift => {
+            let eventTitle = shift.workAreaName || 'Gyűlés';
+            if (shift.type === 'PERSONAL') {
+                eventTitle = `[Személyes] ${shift.description}`;
+            } else if (shift.type === 'MEETING') {
+                eventTitle = shift.shiftName || 'Globális Gyűlés';
+            } else if (shift.shiftName) {
+                eventTitle = `${shift.workAreaName} (${shift.shiftName})`;
+            }
+
+            return {
+                title: eventTitle,
+                start: new Date(shift.startTime),
+                end: new Date(shift.endTime),
+                resource: shift
+            };
+        });
+    }, [filteredShifts]);
 
     const eventStyleGetter = (event: ShiftCalendarEvent) => {
-        let backgroundColor = '#3174ad';
-        if (event.resource.status === 'CONFIRMED') backgroundColor = '#2e7d32';
-        if (event.resource.status === 'PENDING') backgroundColor = '#ed6c02';
-        if (event.resource.status === 'MODIFICATION_REQUESTED') backgroundColor = '#d32f2f';
+        let backgroundColor = '#ed6c02';
+        if (event.resource.type === 'PERSONAL') backgroundColor = '#64748b';
+        else if (event.resource.type === 'MEETING') backgroundColor = '#9c27b0';
+        else {
+            if (event.resource.status === 'CONFIRMED') backgroundColor = '#2e7d32';
+            if (event.resource.status === 'MODIFICATION_REQUESTED') backgroundColor = '#d32f2f';
+        }
         return { style: { backgroundColor, borderRadius: '5px', opacity: 0.9, color: 'white', border: '0px', display: 'block' } };
     };
 
@@ -174,6 +211,99 @@ export default function MyShifts() {
         setSelectedShift(event.resource);
         setChangeMessage(event.resource.message || '');
         setModalOpen(true);
+    };
+
+    const handleNavigate = (newDate: Date) => {
+        setCurrentDate(newDate);
+    };
+
+    // --- ÚJ: Teljesen új saját esemény hozzáadása (Gombbal vagy naptár kattintással) ---
+    const handleOpenNewPersonalModal = (start?: Date, end?: Date) => {
+        const defaultStart = start || new Date();
+        const defaultEnd = end || new Date(defaultStart); // <-- JAVÍTVA CONST-RA
+
+        if (!end) {
+            defaultEnd.setHours(defaultStart.getHours() + 1);
+        }
+
+        setPersonalData({
+            name: '',
+            startTime: toLocalISO(defaultStart),
+            endTime: toLocalISO(defaultEnd)
+        });
+        setIsEditingPersonal(false);
+        setEditingPersonalId(null);
+        setPersonalModalOpen(true);
+    };
+
+    const handleSelectSlot = (slotInfo: SlotInfo) => {
+        const start = new Date(slotInfo.start);
+        let end = new Date(slotInfo.end);
+
+        if (start.getHours() === 0 && start.getMinutes() === 0 && end.getHours() === 0) {
+            start.setHours(8, 0, 0, 0);
+            end = new Date(start);
+            end.setHours(16, 0, 0, 0);
+        }
+        handleOpenNewPersonalModal(start, end);
+    };
+
+    // --- ÚJ: Szerkesztés elindítása ---
+    const handleEditPersonalShift = () => {
+        if (!selectedShift) return;
+        setPersonalData({
+            name: selectedShift.description || '',
+            startTime: toLocalISO(new Date(selectedShift.startTime)),
+            endTime: toLocalISO(new Date(selectedShift.endTime))
+        });
+        setIsEditingPersonal(true);
+        setEditingPersonalId(selectedShift.shiftId);
+        setModalOpen(false);
+        setPersonalModalOpen(true);
+    };
+
+    // --- JAVÍTVA: Mentés támogatja a létrehozást és a módosítást is ---
+    const handleSavePersonalShift = async () => {
+        setActionLoading(true);
+        try {
+            const payload = {
+                description: personalData.name,
+                startTime: personalData.startTime,
+                endTime: personalData.endTime,
+                type: 'PERSONAL',
+                maxVolunteers: 1 // Biztosítjuk, hogy 1 maradjon szerkesztéskor is
+            };
+
+            if (isEditingPersonal && editingPersonalId) {
+                await api.put(`/shifts/${editingPersonalId}`, payload);
+            } else {
+                await api.post(`/shifts/personal`, payload);
+            }
+
+            setPersonalModalOpen(false);
+            fetchMyShifts();
+        } catch (error) {
+            console.error(error);
+            alert("Hiba a mentés során.");
+        } finally {
+            setActionLoading(false);
+        }
+    };
+
+    const handleDeletePersonalShift = async () => {
+        if (!selectedShift) return;
+        if (!window.confirm("Biztosan törlöd ezt a személyes bejegyzést?")) return;
+        setActionLoading(true);
+        try {
+            await api.delete(`/shifts/personal/${selectedShift.shiftId}`);
+            setModalOpen(false);
+            fetchMyShifts();
+        } catch (error) {
+            console.error(error);
+            alert("Hiba a törlés során.");
+        } finally {
+            setActionLoading(false);
+        }
     };
 
     const handleUpdateStatus = async (newStatus: 'CONFIRMED' | 'MODIFICATION_REQUESTED') => {
@@ -187,22 +317,18 @@ export default function MyShifts() {
             setModalOpen(false);
             fetchMyShifts();
         } catch (error) {
-            console.error("Hiba:", error);
+            console.error(error);
             alert("Hiba a művelet során.");
         } finally {
             setActionLoading(false);
         }
     };
 
-    const handleNavigate = (newDate: Date) => {
-        setCurrentDate(newDate);
-    };
-
     const mobileMonthStart = startOfMonth(currentDate);
     const mobileMonthEnd = endOfMonth(mobileMonthStart);
     const mobileStartDate = startOfWeek(mobileMonthStart, { weekStartsOn: 1 });
     const mobileEndDate = endOfWeek(mobileMonthEnd, { weekStartsOn: 1 });
-    const mobileCalendarDays = eachDayOfInterval({ start: mobileStartDate, end: mobileEndDate });
+    const mobileCalendarDays = useMemo(() => eachDayOfInterval({ start: mobileStartDate, end: mobileEndDate }), [mobileStartDate, mobileEndDate]);
 
     return (
         <Container component="main" maxWidth="lg" sx={{ mt: 4, mb: 10 }}>
@@ -210,53 +336,26 @@ export default function MyShifts() {
                 Vissza a Dashboardra
             </Button>
 
-            {/* --- JAVÍTOTT, ATOMBZITOS FEJLÉC ELRENDEZÉS --- */}
             <Box display="flex" flexDirection={{ xs: 'column', md: 'row' }} justifyContent="space-between" alignItems={{ xs: 'stretch', md: 'flex-start' }} gap={3} mb={4}>
-
-                {/* BAL OLDAL: Címsor */}
                 <Box sx={{ flex: 1 }}>
                     <Typography component="h1" variant="h4" fontWeight="900" color="primary.main" sx={{ fontSize: { xs: '2rem', sm: '2.125rem' }, display: 'flex', alignItems: 'center', gap: 1 }}>
-                        Saját Műszakjaim <span>📅</span>
+                        Saját Naptáram <span>📅</span>
                     </Typography>
                     <Typography variant="body1" color="text.secondary" sx={{ mt: 0.5 }}>
-                        Itt kezelheted a beosztásaidat. Kérlek, igazold vissza a függőben lévőket!
+                        Kezeld a beosztásaidat, és rögzítsd a saját elfoglaltságaidat, hogy a szervezők lássák!
                     </Typography>
                 </Box>
 
-                {/* JOBB OLDAL: Szűrők (Vezérlőpult) */}
                 <Box display="flex" flexDirection="column" gap={1.5} sx={{ width: { xs: '100%', md: '450px' } }}>
-
-                    {/* 1. Sor: Hónapválasztó és Eseményszűrő EGYMÁS MELLETT (50-50%) */}
                     <Box display="flex" gap={1.5} sx={{ width: '100%' }}>
-
-                        {/* Hónapválasztó (Balra) */}
                         <Box sx={{ flex: 1 }}>
                             <TextField
-                                fullWidth
-                                label="Ugrás hónapra"
-                                value={format(currentDate, 'yyyy. MMMM', { locale: hu })}
-                                size="small"
-                                onClick={(e) => {
-                                    setMonthPickerAnchor(e.currentTarget);
-                                    setPickerYear(currentDate.getFullYear());
-                                }}
-                                InputProps={{
-                                    readOnly: true,
-                                    startAdornment: <InputAdornment position="start"><CalendarMonthIcon color="action" fontSize="small" /></InputAdornment>,
-                                    style: { cursor: 'pointer', textTransform: 'capitalize' }
-                                }}
-                                InputLabelProps={{ shrink: true }}
-                                sx={{ bgcolor: 'white' }}
+                                fullWidth label="Ugrás hónapra" value={format(currentDate, 'yyyy. MMMM', { locale: hu })} size="small"
+                                onClick={(e) => { setMonthPickerAnchor(e.currentTarget); setPickerYear(currentDate.getFullYear()); }}
+                                InputProps={{ readOnly: true, startAdornment: <InputAdornment position="start"><CalendarMonthIcon color="action" fontSize="small" /></InputAdornment>, style: { cursor: 'pointer', textTransform: 'capitalize' } }}
+                                InputLabelProps={{ shrink: true }} sx={{ bgcolor: 'white' }}
                             />
-
-                            <Popover
-                                open={Boolean(monthPickerAnchor)}
-                                anchorEl={monthPickerAnchor}
-                                onClose={() => setMonthPickerAnchor(null)}
-                                anchorOrigin={{ vertical: 'bottom', horizontal: 'left' }}
-                                transformOrigin={{ vertical: 'top', horizontal: 'left' }}
-                                PaperProps={{ sx: { borderRadius: 3, mt: 0.5, boxShadow: 3 } }}
-                            >
+                            <Popover open={Boolean(monthPickerAnchor)} anchorEl={monthPickerAnchor} onClose={() => setMonthPickerAnchor(null)} anchorOrigin={{ vertical: 'bottom', horizontal: 'left' }} transformOrigin={{ vertical: 'top', horizontal: 'left' }} PaperProps={{ sx: { borderRadius: 3, mt: 0.5, boxShadow: 3 } }}>
                                 <Box p={2} width={280}>
                                     <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
                                         <IconButton size="small" onClick={() => setPickerYear(y => y - 1)}><ChevronLeftIcon /></IconButton>
@@ -267,17 +366,7 @@ export default function MyShifts() {
                                         {monthNames.map((month, index) => {
                                             const isCurrent = currentDate.getMonth() === index && currentDate.getFullYear() === pickerYear;
                                             return (
-                                                <Button
-                                                    key={month} size="small" variant={isCurrent ? "contained" : "text"} disableElevation
-                                                    sx={{
-                                                        borderRadius: 2, color: isCurrent ? 'white' : 'text.primary', textTransform: 'capitalize',
-                                                        '&:hover': { bgcolor: isCurrent ? 'primary.dark' : '#f1f5f9' }
-                                                    }}
-                                                    onClick={() => {
-                                                        setCurrentDate(new Date(pickerYear, index, 1));
-                                                        setMonthPickerAnchor(null);
-                                                    }}
-                                                >
+                                                <Button key={month} size="small" variant={isCurrent ? "contained" : "text"} disableElevation sx={{ borderRadius: 2, color: isCurrent ? 'white' : 'text.primary', textTransform: 'capitalize' }} onClick={() => { setCurrentDate(new Date(pickerYear, index, 1)); setMonthPickerAnchor(null); }}>
                                                     {month.substring(0, 3)}
                                                 </Button>
                                             );
@@ -286,8 +375,6 @@ export default function MyShifts() {
                                 </Box>
                             </Popover>
                         </Box>
-
-                        {/* Esemény szűrő (Jobbra) */}
                         <FormControl size="small" sx={{ flex: 1, bgcolor: 'white' }}>
                             <InputLabel>Esemény szűrő</InputLabel>
                             <Select value={selectedEventFilter} label="Esemény szűrő" onChange={(e) => setSelectedEventFilter(e.target.value)}>
@@ -296,45 +383,47 @@ export default function MyShifts() {
                             </Select>
                         </FormControl>
                     </Box>
-
-                    {/* 2. Sor: Naptár / Lista váltó */}
-                    <ToggleButtonGroup
-                        fullWidth
-                        value={viewMode} exclusive onChange={(_, newView) => newView && setViewMode(newView)} size="small"
-                        sx={{ bgcolor: 'white' }}
-                    >
+                    <ToggleButtonGroup fullWidth value={viewMode} exclusive onChange={(_, newView) => newView && setViewMode(newView)} size="small" sx={{ bgcolor: 'white' }}>
                         <ToggleButton value="calendar"><CalendarMonthIcon sx={{ mr: 1 }} /> Naptár</ToggleButton>
                         <ToggleButton value="list"><FormatListBulletedIcon sx={{ mr: 1 }} /> Lista</ToggleButton>
                     </ToggleButtonGroup>
                 </Box>
             </Box>
 
-            <Box display="flex" gap={2} mb={3} flexWrap="wrap">
-                <Chip icon={<HelpOutlineIcon />} label="Függőben (Megerősítésre vár)" sx={{ bgcolor: '#fff3e0', color: '#e65100' }} />
-                <Chip icon={<CheckCircleOutlineIcon />} label="Elfogadva" sx={{ bgcolor: '#e8f5e9', color: '#2e7d32' }} />
-                <Chip label="Módosítást kértél" sx={{ bgcolor: '#ffebee', color: '#c62828' }} />
+            {/* --- ÚJ: Gomb a saját elfoglaltság felvitelére bárhonnan --- */}
+            <Box display="flex" justifyContent="space-between" alignItems="center" mb={3} flexWrap="wrap" gap={2}>
+                <Box display="flex" gap={1} flexWrap="wrap">
+                    <Chip label="Személyes (Saját)" sx={{ bgcolor: '#f1f5f9', color: '#64748b', fontWeight: 'bold' }} icon={<BlockIcon />} />
+                    <Chip label="Gyűlés / Eligazítás" sx={{ bgcolor: '#f3e5f5', color: '#9c27b0', fontWeight: 'bold' }} icon={<RecordVoiceOverIcon />} />
+                    <Chip icon={<HelpOutlineIcon />} label="Függőben" sx={{ bgcolor: '#fff3e0', color: '#e65100' }} />
+                    <Chip icon={<CheckCircleOutlineIcon />} label="Elfogadva" sx={{ bgcolor: '#e8f5e9', color: '#2e7d32' }} />
+                </Box>
+                <Button
+                    variant="contained"
+                    color="primary"
+                    startIcon={<AddIcon />}
+                    onClick={() => handleOpenNewPersonalModal()}
+                    sx={{ borderRadius: 2, fontWeight: 'bold', boxShadow: 2 }}
+                >
+                    Saját elfoglaltság
+                </Button>
             </Box>
 
-            <Paper elevation={3} sx={{ p: 2, borderRadius: 3, height: { xs: 'auto', md: '70vh' }, minHeight: { md: '600px' }, display: 'flex', flexDirection: 'column' }}>
+            <Paper elevation={3} sx={{ p: 2, borderRadius: 3, height: { xs: 'auto', md: 'calc(100vh - 280px)' }, minHeight: { md: '600px' }, display: 'flex', flexDirection: 'column' }}>
                 {loading ? (
                     <Box display="flex" justifyContent="center" alignItems="center" height="300px"><CircularProgress /></Box>
                 ) : (
                     viewMode === 'calendar' ? (
                         isMobile ? (
-                            /* --- SAMSUNG-STÍLUSÚ MOBIL NAPTÁR --- */
                             <Box display="flex" flexDirection="column" height="100%">
                                 <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
                                     <IconButton onClick={() => setCurrentDate(subMonths(currentDate, 1))}><ChevronLeftIcon /></IconButton>
-                                    <Typography fontWeight="bold" textTransform="capitalize" variant="h6">
-                                        {format(currentDate, 'yyyy. MMMM', { locale: hu })}
-                                    </Typography>
+                                    <Typography fontWeight="bold" textTransform="capitalize" variant="h6">{format(currentDate, 'yyyy. MMMM', { locale: hu })}</Typography>
                                     <IconButton onClick={() => setCurrentDate(addMonths(currentDate, 1))}><ChevronRightIcon /></IconButton>
                                 </Box>
 
                                 <Box display="grid" gridTemplateColumns="repeat(7, 1fr)" mb={1}>
-                                    {['H', 'K', 'Sze', 'Cs', 'P', 'Szo', 'V'].map(day => (
-                                        <Typography key={day} align="center" variant="caption" color="text.secondary" fontWeight="bold">{day}</Typography>
-                                    ))}
+                                    {['H', 'K', 'Sze', 'Cs', 'P', 'Szo', 'V'].map(day => <Typography key={day} align="center" variant="caption" color="text.secondary" fontWeight="bold">{day}</Typography>)}
                                 </Box>
 
                                 <Box display="grid" gridTemplateColumns="repeat(7, 1fr)" gap={0.5} mb={2}>
@@ -342,32 +431,22 @@ export default function MyShifts() {
                                         const isSelected = isSameDay(day, currentDate);
                                         const isCurrentMonth = isSameMonth(day, currentDate);
                                         const isToday = isSameDay(day, new Date());
-                                        const dayShifts = filteredShifts.filter(s => isSameDay(new Date(s.startTime), day));
+                                        const dayKey = format(day, 'yyyy-MM-dd');
+                                        const dayShifts = shiftsByDay.get(dayKey) || [];
 
                                         return (
-                                            <Box
-                                                key={day.toISOString()}
-                                                onClick={() => setCurrentDate(day)}
-                                                sx={{
-                                                    display: 'flex', flexDirection: 'column', alignItems: 'center', p: 1,
-                                                    cursor: 'pointer', borderRadius: 3,
-                                                    bgcolor: isSelected ? 'primary.main' : isToday ? '#e2e8f0' : 'transparent',
-                                                    color: isSelected ? 'white' : isCurrentMonth ? 'text.primary' : 'text.disabled',
-                                                    '&:hover': { bgcolor: isSelected ? 'primary.dark' : '#f8fafc' }
-                                                }}
-                                            >
-                                                <Typography variant="body2" fontWeight={isSelected || isToday ? 'bold' : 'normal'}>
-                                                    {format(day, 'd')}
-                                                </Typography>
+                                            <Box key={day.toISOString()} onClick={() => setCurrentDate(day)} sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', p: 1, cursor: 'pointer', borderRadius: 3, bgcolor: isSelected ? 'primary.main' : isToday ? '#e2e8f0' : 'transparent', color: isSelected ? 'white' : isCurrentMonth ? 'text.primary' : 'text.disabled' }}>
+                                                <Typography variant="body2" fontWeight={isSelected || isToday ? 'bold' : 'normal'}>{format(day, 'd')}</Typography>
                                                 <Box display="flex" gap={0.5} mt={0.5} height={6}>
-                                                    {dayShifts.slice(0, 3).map((s, i) => (
-                                                        <Box key={i} sx={{
-                                                            width: 6, height: 6, borderRadius: '50%',
-                                                            bgcolor: s.status === 'CONFIRMED' ? (isSelected ? '#a5d6a7' : '#2e7d32') :
-                                                                s.status === 'PENDING' ? (isSelected ? '#ffcc80' : '#ed6c02') :
-                                                                    (isSelected ? '#ef9a9a' : '#d32f2f')
-                                                        }} />
-                                                    ))}
+                                                    {dayShifts.slice(0, 3).map((s, i) => {
+                                                        let color = '#ed6c02';
+                                                        if (s.type === 'PERSONAL') color = '#64748b';
+                                                        else if (s.type === 'MEETING') color = '#9c27b0';
+                                                        else if (s.status === 'CONFIRMED') color = '#2e7d32';
+                                                        else if (s.status === 'MODIFICATION_REQUESTED') color = '#d32f2f';
+                                                        if (isSelected && color === '#2e7d32') color = '#a5d6a7';
+                                                        return <Box key={i} sx={{ width: 6, height: 6, borderRadius: '50%', bgcolor: color }} />
+                                                    })}
                                                 </Box>
                                             </Box>
                                         );
@@ -376,67 +455,91 @@ export default function MyShifts() {
 
                                 <Divider sx={{ mb: 2 }} />
 
-                                <Typography variant="subtitle1" fontWeight="bold" mb={2} color="primary.main">
-                                    Teendők: {format(currentDate, 'MMMM d.', { locale: hu })}
-                                </Typography>
-
                                 <Box sx={{ overflowY: 'auto', flexGrow: 1, pr: 1, maxHeight: '300px' }}>
-                                    {filteredShifts.filter(s => isSameDay(new Date(s.startTime), currentDate)).length === 0 ? (
-                                        <Typography color="text.secondary" align="center" fontStyle="italic" mt={2}>Nincs teendőd ezen a napon.</Typography>
-                                    ) : (
-                                        filteredShifts.filter(s => isSameDay(new Date(s.startTime), currentDate)).map(shift => (
-                                            <Paper key={shift.assignmentId} variant="outlined" sx={{ p: 2, mb: 2, cursor: 'pointer', borderLeft: '6px solid', borderLeftColor: shift.status === 'CONFIRMED' ? '#2e7d32' : shift.status === 'PENDING' ? '#ed6c02' : '#d32f2f' }} onClick={() => handleSelectEvent({ title: '', start: new Date(), end: new Date(), resource: shift })}>
-                                                <Typography variant="h6" color="primary" fontWeight="bold">{shift.workAreaName}</Typography>
-                                                <Typography variant="subtitle2" color="text.secondary">{shift.eventName}</Typography>
-                                                <Typography variant="body1" sx={{ mt: 1 }}>{new Date(shift.startTime).toLocaleTimeString('hu-HU')} - {new Date(shift.endTime).toLocaleTimeString('hu-HU')}</Typography>
-                                            </Paper>
-                                        ))
-                                    )}
+                                    {(() => {
+                                        const selectedDayKey = format(currentDate, 'yyyy-MM-dd');
+                                        const currentDayShifts = shiftsByDay.get(selectedDayKey) || [];
+
+                                        if (currentDayShifts.length === 0) return <Typography color="text.secondary" align="center" fontStyle="italic" mt={2}>Ezen a napon szabad vagy.</Typography>;
+
+                                        return currentDayShifts.map(shift => {
+                                            let color = '#ed6c02';
+                                            if (shift.type === 'PERSONAL') color = '#64748b';
+                                            else if (shift.type === 'MEETING') color = '#9c27b0';
+                                            else if (shift.status === 'CONFIRMED') color = '#2e7d32';
+                                            else if (shift.status === 'MODIFICATION_REQUESTED') color = '#d32f2f';
+
+                                            let boxTitle = shift.workAreaName || 'Gyűlés';
+                                            if (shift.type === 'PERSONAL') boxTitle = shift.description || 'Személyes';
+                                            else if (shift.type === 'MEETING') boxTitle = shift.shiftName || 'Globális Gyűlés';
+                                            else if (shift.shiftName) boxTitle = `${shift.workAreaName} - ${shift.shiftName}`;
+
+                                            return (
+                                                <Paper key={shift.assignmentId} variant="outlined" sx={{ p: 2, mb: 2, cursor: 'pointer', borderLeft: '6px solid', borderLeftColor: color }} onClick={() => handleSelectEvent({ title: '', start: new Date(), end: new Date(), resource: shift })}>
+                                                    <Typography variant="h6" color="primary" fontWeight="bold">{boxTitle}</Typography>
+                                                    <Typography variant="body1" sx={{ mt: 1 }}>{new Date(shift.startTime).toLocaleTimeString('hu-HU')} - {new Date(shift.endTime).toLocaleTimeString('hu-HU')}</Typography>
+                                                </Paper>
+                                            );
+                                        })
+                                    })()}
                                 </Box>
+                                <Button fullWidth variant="outlined" color="primary" sx={{ mt: 2 }} onClick={() => handleOpenNewPersonalModal(currentDate)}>
+                                    Saját elfoglaltság ide
+                                </Button>
                             </Box>
                         ) : (
-                            /* --- ASZTALI NAPTÁR --- */
-                            <Box sx={{ flexGrow: 1, overflowX: 'auto' }}>
-                                <Calendar
-                                    localizer={localizer}
-                                    events={calendarEvents}
-                                    startAccessor="start" endAccessor="end"
-                                    culture="hu"
-                                    date={currentDate}
-                                    onNavigate={handleNavigate}
-                                    view={currentView}
-                                    onView={(newView) => setCurrentView(newView)}
-                                    selectable={true}
-                                    onSelectSlot={(slotInfo) => {
-                                        setCurrentDate(slotInfo.start);
-                                        setCurrentView('day');
-                                    }}
-                                    onDrillDown={(date) => {
-                                        setCurrentDate(date);
-                                        setCurrentView('day');
-                                    }}
-                                    components={{ toolbar: CustomToolbar }}
-                                    messages={{ noEventsInRange: "Nincs műszak.", showMore: (total) => `+${total} további` }}
-                                    onSelectEvent={handleSelectEvent}
-                                    eventPropGetter={eventStyleGetter}
-                                    style={{ minWidth: 800, height: '100%', fontFamily: 'inherit' }}
-                                />
+                            <Box sx={{ flexGrow: 1, overflowX: 'auto', display: 'flex', flexDirection: 'column' }}>
+                                <Typography variant="caption" color="text.secondary" display="flex" alignItems="center" gap={0.5} mb={1}>
+                                    <InfoOutlinedIcon fontSize="small" />
+                                    Tipp: Kattints vagy húzz egy sávot egy üres területre a saját privát elfoglaltságod (pl. Orvos, Vizsga) rögzítéséhez!
+                                </Typography>
+                                <Box sx={{ flexGrow: 1, minHeight: 0 }}>
+                                    <Calendar
+                                        localizer={localizer}
+                                        events={calendarEvents}
+                                        startAccessor="start" endAccessor="end"
+                                        culture="hu"
+                                        date={currentDate}
+                                        onNavigate={handleNavigate}
+                                        view={currentView}
+                                        onView={(newView) => setCurrentView(newView)}
+                                        selectable={true}
+                                        onSelectSlot={handleSelectSlot}
+                                        onDrillDown={(date) => { setCurrentDate(date); setCurrentView('day'); }}
+                                        components={{ toolbar: CustomToolbar }}
+                                        messages={{ noEventsInRange: "Nincs beosztásod.", showMore: (total) => `+${total} további` }}
+                                        onSelectEvent={handleSelectEvent}
+                                        eventPropGetter={eventStyleGetter}
+                                        style={{ minWidth: 800, height: '100%', fontFamily: 'inherit' }}
+                                    />
+                                </Box>
                             </Box>
                         )
                     ) : (
-                        /* --- LISTA NÉZET --- */
                         <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
                             <Box sx={{ overflowY: 'auto', flexGrow: 1, pr: 1 }}>
                                 {finalShiftsForList.length === 0 ? (
                                     <Typography color="text.secondary" align="center" mt={4}>Nincs beosztásod ebben a hónapban.</Typography>
                                 ) : (
-                                    paginatedShifts.map(shift => (
-                                        <Paper key={shift.assignmentId} variant="outlined" sx={{ p: 2, mb: 2, cursor: 'pointer', '&:hover': { bgcolor: '#f8fafc' }, borderLeft: '6px solid', borderLeftColor: shift.status === 'CONFIRMED' ? '#2e7d32' : shift.status === 'PENDING' ? '#ed6c02' : '#d32f2f' }} onClick={() => handleSelectEvent({ title: '', start: new Date(), end: new Date(), resource: shift })}>
-                                            <Typography variant="h6" color="primary" fontWeight="bold">{shift.workAreaName}</Typography>
-                                            <Typography variant="subtitle2" color="text.secondary">{shift.eventName}</Typography>
-                                            <Typography variant="body1" sx={{ mt: 1 }}>{new Date(shift.startTime).toLocaleString('hu-HU')} - {new Date(shift.endTime).toLocaleTimeString('hu-HU')}</Typography>
-                                        </Paper>
-                                    ))
+                                    paginatedShifts.map(shift => {
+                                        let color = '#ed6c02';
+                                        if (shift.type === 'PERSONAL') color = '#64748b';
+                                        else if (shift.type === 'MEETING') color = '#9c27b0';
+                                        else if (shift.status === 'CONFIRMED') color = '#2e7d32';
+                                        else if (shift.status === 'MODIFICATION_REQUESTED') color = '#d32f2f';
+
+                                        let boxTitle = shift.workAreaName || 'Gyűlés';
+                                        if (shift.type === 'PERSONAL') boxTitle = shift.description || 'Személyes';
+                                        else if (shift.type === 'MEETING') boxTitle = shift.shiftName || 'Globális Gyűlés';
+                                        else if (shift.shiftName) boxTitle = `${shift.workAreaName} - ${shift.shiftName}`;
+
+                                        return (
+                                            <Paper key={shift.assignmentId} variant="outlined" sx={{ p: 2, mb: 2, cursor: 'pointer', '&:hover': { bgcolor: '#f8fafc' }, borderLeft: '6px solid', borderLeftColor: color }} onClick={() => handleSelectEvent({ title: '', start: new Date(), end: new Date(), resource: shift })}>
+                                                <Typography variant="h6" color="primary" fontWeight="bold">{boxTitle}</Typography>
+                                                <Typography variant="body1" sx={{ mt: 1 }}>{new Date(shift.startTime).toLocaleString('hu-HU')} - {new Date(shift.endTime).toLocaleTimeString('hu-HU')}</Typography>
+                                            </Paper>
+                                        );
+                                    })
                                 )}
                             </Box>
                             {finalShiftsForList.length > ITEMS_PER_PAGE && (
@@ -449,104 +552,85 @@ export default function MyShifts() {
                 )}
             </Paper>
 
-            {/* --- JAVÍTOTT MODAL --- */}
+            <Dialog open={personalModalOpen} onClose={() => setPersonalModalOpen(false)} maxWidth="xs" fullWidth PaperProps={{ sx: { borderRadius: 3 } }}>
+                <DialogTitle sx={{ fontWeight: 'bold' }}>{isEditingPersonal ? 'Elfoglaltság Módosítása' : 'Saját Elfoglaltság Rögzítése'}</DialogTitle>
+                <DialogContent dividers sx={{ p: 3 }}>
+                    <Alert severity="info" sx={{ mb: 2 }}>
+                        Ezt a bejegyzést csak te látod, de a szervezők naptárában "Személyes elfoglaltságként" fog megjelenni, így tudni fogják, hogy ide nem oszthatnak be.
+                    </Alert>
+                    <TextField margin="normal" label="Elfoglaltság (pl. Vizsga, Fogorvos)" fullWidth value={personalData.name} onChange={(e) => setPersonalData({...personalData, name: e.target.value})} disabled={actionLoading} />
+                    <TextField margin="normal" type="datetime-local" label="Kezdés" fullWidth InputLabelProps={{ shrink: true }} value={personalData.startTime} onChange={(e) => setPersonalData({...personalData, startTime: e.target.value})} disabled={actionLoading} />
+                    <TextField margin="normal" type="datetime-local" label="Vége" fullWidth InputLabelProps={{ shrink: true }} value={personalData.endTime} onChange={(e) => setPersonalData({...personalData, endTime: e.target.value})} disabled={actionLoading} />
+                </DialogContent>
+                <DialogActions sx={{ p: 2 }}>
+                    <Button onClick={() => setPersonalModalOpen(false)} color="inherit" disabled={actionLoading}>Mégse</Button>
+                    <Button onClick={handleSavePersonalShift} variant="contained" disabled={actionLoading || !personalData.startTime || !personalData.endTime || !personalData.name.trim()}>Mentés</Button>
+                </DialogActions>
+            </Dialog>
+
             <Dialog open={modalOpen} onClose={() => setModalOpen(false)} maxWidth="sm" fullWidth PaperProps={{ sx: { borderRadius: 3 } }}>
-                <DialogTitle sx={{ bgcolor: 'primary.main', color: 'white', fontWeight: 'bold' }}>Műszak Részletei</DialogTitle>
+                <DialogTitle sx={{ bgcolor: 'primary.main', color: 'white', fontWeight: 'bold' }}>Részletek</DialogTitle>
                 <DialogContent sx={{ mt: 2 }}>
                     {selectedShift && (
                         <>
-                            <Typography variant="h5" fontWeight="900" gutterBottom>{selectedShift.workAreaName}</Typography>
-                            <Typography variant="subtitle1" color="text.secondary" gutterBottom>Esemény: {selectedShift.eventName}</Typography>
+                            {selectedShift.type === 'PERSONAL' ? (
+                                <>
+                                    <Typography variant="h5" fontWeight="900" gutterBottom><BlockIcon sx={{ verticalAlign: 'bottom', color: '#64748b' }}/> {selectedShift.description}</Typography>
+                                    <Alert severity="info" sx={{ mt: 2 }}>Ez egy általad rögzített személyes elfoglaltság. Ezt az időpontot a szervezők is látják szürkén.</Alert>
+                                </>
+                            ) : (
+                                <>
+                                    <Typography variant="h5" fontWeight="900" gutterBottom>{selectedShift.shiftName || selectedShift.workAreaName || 'Globális Gyűlés'}</Typography>
+                                    <Typography variant="subtitle1" color="text.secondary" gutterBottom>Esemény: {selectedShift.eventName}</Typography>
+                                    <Typography variant="subtitle2" fontWeight="bold" gutterBottom>Kivel leszel beosztva?</Typography>
+                                    {selectedShift.coWorkers && selectedShift.coWorkers.length > 0 ? (
+                                        <Box display="flex" flexWrap="wrap" gap={1} mb={3}>
+                                            {selectedShift.coWorkers.map((name, idx) => <Chip key={idx} label={name} avatar={<Avatar>{name.charAt(0)}</Avatar>} />)}
+                                        </Box>
+                                    ) : (
+                                        <Typography variant="body2" color="text.secondary" mb={3} fontStyle="italic">Egyelőre csak te vagy beosztva.</Typography>
+                                    )}
+                                    <Divider sx={{ mb: 3 }} />
+                                    {selectedShift.status === 'CONFIRMED' && <Alert severity="success" sx={{ mb: 2 }}>Ezt a beosztást már elfogadtad. Köszönjük!</Alert>}
+                                    {selectedShift.status === 'MODIFICATION_REQUESTED' && <Alert severity="error" sx={{ mb: 2 }}>Módosítást kértél.</Alert>}
+                                    {selectedShift.status === 'PENDING' && <Alert severity="warning" sx={{ mb: 2 }}>Kérlek, jelezd a szervezőknek, hogy számíthatnak-e rád!</Alert>}
+
+                                    <Box mt={2}>
+                                        <Typography variant="subtitle2" fontWeight="bold" gutterBottom>Üzenet a szervezőknek</Typography>
+                                        <TextField fullWidth multiline rows={2} placeholder="Írd ide az üzeneted..." value={changeMessage} onChange={(e) => setChangeMessage(e.target.value)} disabled={actionLoading} />
+                                    </Box>
+                                </>
+                            )}
 
                             <Box bgcolor="#f1f5f9" p={2} borderRadius={2} mt={2} mb={3}>
                                 <Typography variant="body1" fontWeight="bold">Időpont:</Typography>
                                 <Typography variant="body1">Kezdés: {new Date(selectedShift.startTime).toLocaleString('hu-HU')} <br /> Vége: {new Date(selectedShift.endTime).toLocaleString('hu-HU')}</Typography>
                             </Box>
-
-                            <Typography variant="subtitle2" fontWeight="bold" gutterBottom>Kivel leszel beosztva?</Typography>
-                            {selectedShift.coWorkers && selectedShift.coWorkers.length > 0 ? (
-                                <Box display="flex" flexWrap="wrap" gap={1} mb={3}>
-                                    {selectedShift.coWorkers.map((name, idx) => <Chip key={idx} label={name} avatar={<Avatar>{name.charAt(0)}</Avatar>} />)}
-                                </Box>
-                            ) : (
-                                <Typography variant="body2" color="text.secondary" mb={3} fontStyle="italic">Egyelőre csak te vagy beosztva.</Typography>
-                            )}
-
-                            <Divider sx={{ mb: 3 }} />
-
-                            {selectedShift.status === 'CONFIRMED' && <Alert severity="success" sx={{ mb: 2 }}>Ezt a műszakot már elfogadtad. Köszönjük!</Alert>}
-                            {selectedShift.status === 'MODIFICATION_REQUESTED' && <Alert severity="error" sx={{ mb: 2 }}>Módosítást / lemondást kértél erre a műszakra.</Alert>}
-                            {selectedShift.status === 'PENDING' && <Alert severity="warning" sx={{ mb: 2 }}>Kérlek, jelezd a szervezőknek, hogy számíthatnak-e rád!</Alert>}
-
-                            <Box mt={2}>
-                                <Typography variant="subtitle2" fontWeight="bold" gutterBottom>
-                                    Üzenet a szervezőknek (opcionális, pl.: "Késem 10 percet...")
-                                </Typography>
-                                <TextField
-                                    fullWidth multiline rows={2}
-                                    placeholder="Írd ide az üzeneted..."
-                                    value={changeMessage}
-                                    onChange={(e) => setChangeMessage(e.target.value)}
-                                    disabled={actionLoading}
-                                />
-                            </Box>
                         </>
                     )}
                 </DialogContent>
-
-                {/* TÖKÉLETESÍTETT GOMBSOR */}
-                <DialogActions sx={{
-                    p: 2, px: 3, bgcolor: '#f8fafc', borderTop: '1px solid #e2e8f0',
-                    display: 'flex', flexDirection: { xs: 'column-reverse', sm: 'row' }, gap: 1.5, justifyContent: 'space-between'
-                }}>
-
-                    <Button
-                        onClick={() => setModalOpen(false)}
-                        color="inherit"
-                        sx={{ fontWeight: 'bold', width: { xs: '100%', sm: 'auto' } }}
-                        disabled={actionLoading}
-                    >
-                        Bezárás
-                    </Button>
-
+                <DialogActions sx={{ p: 2, px: 3, bgcolor: '#f8fafc', borderTop: '1px solid #e2e8f0', display: 'flex', flexDirection: { xs: 'column-reverse', sm: 'row' }, gap: 1.5, justifyContent: 'space-between' }}>
+                    <Button onClick={() => setModalOpen(false)} color="inherit" sx={{ fontWeight: 'bold', width: { xs: '100%', sm: 'auto' } }} disabled={actionLoading}>Bezárás</Button>
                     <Box display="flex" gap={1.5} flexDirection={{ xs: 'column', sm: 'row' }} sx={{ width: { xs: '100%', sm: 'auto' } }}>
-                        {selectedShift?.status === 'CONFIRMED' ? (
+                        {selectedShift?.type === 'PERSONAL' ? (
                             <>
-                                <Button
-                                    variant="outlined" color="error"
-                                    sx={{ width: { xs: '100%', sm: 'auto' } }} // <-- JAVÍTVA
-                                    onClick={() => handleUpdateStatus('MODIFICATION_REQUESTED')}
-                                    disabled={actionLoading || !changeMessage.trim()}
-                                >
-                                    Mégsem tudok menni
+                                {/* JAVÍTVA: A Szerkesztés gomb itt jelenik meg a Személyes elfoglaltságoknál! */}
+                                <Button variant="outlined" color="primary" startIcon={<EditIcon />} sx={{ width: { xs: '100%', sm: 'auto' } }} onClick={handleEditPersonalShift} disabled={actionLoading}>
+                                    Szerkesztés
                                 </Button>
-                                <Button
-                                    variant="contained" color="primary"
-                                    sx={{ width: { xs: '100%', sm: 'auto' } }} // <-- JAVÍTVA
-                                    onClick={() => handleUpdateStatus('CONFIRMED')}
-                                    disabled={actionLoading || changeMessage === (selectedShift?.message || '')}
-                                >
-                                    Üzenet frissítése
+                                <Button variant="contained" color="error" startIcon={<DeleteOutlineIcon />} sx={{ width: { xs: '100%', sm: 'auto' } }} onClick={handleDeletePersonalShift} disabled={actionLoading}>
+                                    Törlés
                                 </Button>
+                            </>
+                        ) : selectedShift?.status === 'CONFIRMED' ? (
+                            <>
+                                <Button variant="outlined" color="error" sx={{ width: { xs: '100%', sm: 'auto' } }} onClick={() => handleUpdateStatus('MODIFICATION_REQUESTED')} disabled={actionLoading || !changeMessage.trim()}>Mégsem tudok menni</Button>
+                                <Button variant="contained" color="primary" sx={{ width: { xs: '100%', sm: 'auto' } }} onClick={() => handleUpdateStatus('CONFIRMED')} disabled={actionLoading || changeMessage === (selectedShift?.message || '')}>Üzenet frissítése</Button>
                             </>
                         ) : (
                             <>
-                                <Button
-                                    variant="outlined" color="error"
-                                    sx={{ width: { xs: '100%', sm: 'auto' } }} // <-- JAVÍTVA
-                                    onClick={() => handleUpdateStatus('MODIFICATION_REQUESTED')}
-                                    disabled={actionLoading || !changeMessage.trim()}
-                                >
-                                    Probléma van / Nem jó
-                                </Button>
-                                <Button
-                                    variant="contained" color="success" startIcon={<CheckCircleOutlineIcon />}
-                                    sx={{ width: { xs: '100%', sm: 'auto' } }} // <-- JAVÍTVA
-                                    onClick={() => handleUpdateStatus('CONFIRMED')}
-                                    disabled={actionLoading}
-                                >
-                                    Elfogadom a műszakot
-                                </Button>
+                                <Button variant="outlined" color="error" sx={{ width: { xs: '100%', sm: 'auto' } }} onClick={() => handleUpdateStatus('MODIFICATION_REQUESTED')} disabled={actionLoading || !changeMessage.trim()}>Probléma van / Nem jó</Button>
+                                <Button variant="contained" color="success" startIcon={<CheckCircleOutlineIcon />} sx={{ width: { xs: '100%', sm: 'auto' } }} onClick={() => handleUpdateStatus('CONFIRMED')} disabled={actionLoading}>Elfogadom a műszakot</Button>
                             </>
                         )}
                     </Box>
