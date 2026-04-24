@@ -9,6 +9,8 @@ import com.example.volunteermanagement.model.Event;
 import com.example.volunteermanagement.service.EventService;
 import com.example.volunteermanagement.service.EventTeamService;
 import com.example.volunteermanagement.service.ShiftService;
+import com.example.volunteermanagement.service.FileStorageService;
+import com.example.volunteermanagement.repository.EventRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Page;
@@ -16,10 +18,13 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.security.Principal;
 import java.util.List;
+import java.util.Map;
 
 @RestController
 @RequestMapping("/api/events")
@@ -27,6 +32,8 @@ import java.util.List;
 public class EventController {
 
     private final EventService eventService;
+    private final FileStorageService fileStorageService;
+    private final EventRepository eventRepository;
 
     @Autowired
     private ShiftService shiftService;
@@ -37,17 +44,25 @@ public class EventController {
     @Autowired
     private EventTeamService eventTeamService;
 
+    // JAVÍTVA: Mivel a Service már EventDTO-t ad vissza, egyből ezt adjuk a ResponseEntity-nek!
     @PostMapping
-    // OKOS ZÁR: Csak a szervezet jogosult tagjai hozhatnak létre eseményt!
-    @PreAuthorize("@eventSecurity.canCreateEventForOrg(authentication.name, #eventDTO.organizationId)")
+    @PreAuthorize("@eventSecurity.canCreateEventForOrg(authentication.name, #eventDTO.organization.id)")
     public ResponseEntity<EventDTO> createEvent(@RequestBody EventDTO eventDTO, Principal principal) {
-        Event createdEvent = eventService.createEventWithWorkAreas(eventDTO, principal.getName());
-        return ResponseEntity.status(HttpStatus.CREATED).body(eventService.getEventDTOById(createdEvent.getId()));
+        EventDTO createdEvent = eventService.createEventWithWorkAreas(eventDTO, principal.getName());
+        return ResponseEntity.status(HttpStatus.CREATED).body(createdEvent);
+    }
+
+    @GetMapping("/public")
+    public ResponseEntity<Page<EventDTO>> getPublicEvents(Pageable pageable) {
+        return ResponseEntity.ok(eventService.getPublicEventsFromMaster(pageable));
     }
 
     @GetMapping
-    public ResponseEntity<Page<EventDTO>> getAllEvents(Pageable pageable, Principal principal) {
-        return ResponseEntity.ok(eventService.getAllEvents(pageable, principal.getName()));
+    public ResponseEntity<Page<EventDTO>> getAllEvents(
+            @RequestParam(required = false) Long orgId,
+            Pageable pageable,
+            Principal principal) {
+        return ResponseEntity.ok(eventService.getAllEvents(pageable, principal.getName(), orgId));
     }
 
     @GetMapping("/{id}")
@@ -55,14 +70,13 @@ public class EventController {
         return ResponseEntity.ok(eventService.getEventDTOById(id));
     }
 
-    // --- JAVÍTVA: Principal hozzáadva a módosításhoz ---
+    // JAVÍTVA: A visszatérési típus itt most már ResponseEntity<EventDTO> a nyers Event helyett!
     @PutMapping("/{id}")
     @PreAuthorize("@eventSecurity.hasPermission(authentication.name, #id, 'EDIT_EVENT_DETAILS')")
-    public ResponseEntity<Event> updateEvent(@PathVariable Long id, @RequestBody EventDTO eventDTO, Principal principal) {
+    public ResponseEntity<EventDTO> updateEvent(@PathVariable Long id, @RequestBody EventDTO eventDTO, Principal principal) {
         return ResponseEntity.ok(eventService.updateEvent(id, eventDTO, principal.getName()));
     }
 
-    // --- JAVÍTVA: Principal hozzáadva a törléshez ---
     @DeleteMapping("/{id}")
     @PreAuthorize("@eventSecurity.hasPermission(authentication.name, #id, 'EDIT_EVENT_DETAILS')")
     public ResponseEntity<Void> deleteEvent(@PathVariable Long id, Principal principal) {
@@ -71,17 +85,16 @@ public class EventController {
     }
 
     @GetMapping("/{id}/shifts")
+    @PreAuthorize("@eventSecurity.canViewEventData(authentication.name, #id)")
     public ResponseEntity<List<ShiftDTO>> getEventShifts(@PathVariable Long id) {
         return ResponseEntity.ok(shiftService.getShiftsByEvent(id));
     }
 
     @GetMapping("/{id}/work-areas")
     public ResponseEntity<List<WorkAreaDTO>> getEventWorkAreas(@PathVariable Long id) {
-        // Feltételezve, hogy az EventService-ben van már ilyen, vagy lekérhető:
         return ResponseEntity.ok(eventService.getWorkAreasByEventId(id));
     }
 
-    // --- ÚJ: Az önkéntes saját műszakjainak lekérése a Naptárhoz ---
     @GetMapping("/my-shifts")
     public ResponseEntity<List<com.example.volunteermanagement.dto.MyShiftDTO>> getMyShifts(Principal principal) {
         return ResponseEntity.ok(shiftService.getMyShifts(principal.getName()));
@@ -99,14 +112,12 @@ public class EventController {
         return ResponseEntity.ok(permissions);
     }
 
-    // --- ÚJ: Esemény szintű csapat lekérése ---
     @GetMapping("/{eventId}/team")
-    @PreAuthorize("@eventSecurity.canManageEventTeam(authentication.name, #eventId)")
+    @PreAuthorize("@eventSecurity.canViewEventData(authentication.name, #eventId)")
     public ResponseEntity<List<com.example.volunteermanagement.dto.EventTeamMemberDTO>> getEventTeam(@PathVariable Long eventId) {
         return ResponseEntity.ok(eventTeamService.getEventTeam(eventId));
     }
 
-    // --- ÚJ: Esemény szintű csapat tagjának módosítása (Mátrix mentés) ---
     @PutMapping("/{eventId}/team/{userId}")
     @PreAuthorize("@eventSecurity.canManageEventTeam(authentication.name, #eventId)")
     public ResponseEntity<Void> updateEventTeamMember(
@@ -117,5 +128,68 @@ public class EventController {
 
         eventTeamService.updateEventTeamMember(eventId, userId, request, principal.getName());
         return ResponseEntity.ok().build();
+    }
+
+    @GetMapping("/sync-legacy")
+    public org.springframework.http.ResponseEntity<String> syncLegacyEvents() {
+        String result = eventService.syncAllLegacyEventsToMaster();
+        return org.springframework.http.ResponseEntity.ok(result);
+    }
+
+    // =========================================================================
+    // ESEMÉNY BANNER (BORÍTÓKÉP) FELTÖLTÉSE
+    // =========================================================================
+    @PostMapping("/{id}/banner")
+    @PreAuthorize("@eventSecurity.hasPermission(authentication.name, #id, 'EDIT_EVENT_DETAILS')")
+    @Transactional
+    public ResponseEntity<?> uploadEventBanner(@PathVariable Long id, @RequestParam("file") MultipartFile file) {
+        try {
+            Event event = eventRepository.findById(id)
+                    .orElseThrow(() -> new RuntimeException("Esemény nem található"));
+
+            String fileUrl = fileStorageService.storeFile(file, "banners");
+            event.setBannerUrl(fileUrl);
+            eventRepository.save(event);
+
+            eventService.updateEventInMaster(event);
+
+            return ResponseEntity.ok(Map.of(
+                    "message", "Esemény borítókép sikeresen frissítve!",
+                    "imageUrl", fileUrl
+            ));
+        } catch (Exception e) {
+            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+        }
+    }
+
+    // =========================================================================
+    // ESEMÉNY BANNER TÖRLÉSE
+    // =========================================================================
+    @DeleteMapping("/{id}/banner")
+    @PreAuthorize("@eventSecurity.hasPermission(authentication.name, #id, 'EDIT_EVENT_DETAILS')")
+    @Transactional
+    public ResponseEntity<?> deleteEventBanner(@PathVariable Long id) {
+        try {
+            Event event = eventRepository.findById(id)
+                    .orElseThrow(() -> new RuntimeException("Esemény nem található"));
+
+            event.setBannerUrl(null);
+            eventRepository.save(event);
+
+            eventService.updateEventInMaster(event);
+
+            return ResponseEntity.ok(Map.of("message", "Esemény borítókép sikeresen törölve!"));
+        } catch (Exception e) {
+            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+        }
+    }
+
+    // =========================================================================
+    // ÚJ: ELÉRHETŐSÉGEK / KAPCSOLATTARTÓK VÉGPONT
+    // =========================================================================
+    @GetMapping("/{id}/contacts")
+    @PreAuthorize("isAuthenticated()")
+    public ResponseEntity<List<Map<String, Object>>> getEventContacts(@PathVariable Long id) {
+        return ResponseEntity.ok(eventService.getEventContacts(id));
     }
 }

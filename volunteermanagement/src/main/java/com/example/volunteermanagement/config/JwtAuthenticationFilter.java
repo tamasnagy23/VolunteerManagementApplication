@@ -1,5 +1,6 @@
 package com.example.volunteermanagement.config;
 
+import com.example.volunteermanagement.tenant.TenantContext;
 import io.jsonwebtoken.ExpiredJwtException;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
@@ -34,7 +35,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         final String jwt;
         final String userEmail;
 
-        // Ha nincs token (pl. login vagy regisztráció kérésnél), menjünk tovább a láncban
+        // Ha nincs token, menjünk tovább a láncban
         if (authHeader == null || !authHeader.startsWith("Bearer ")) {
             filterChain.doFilter(request, response);
             return;
@@ -42,12 +43,21 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
         try {
             jwt = authHeader.substring(7);
-
-            // FIGYELEM: Már ez a sor is eldobhatja az ExpiredJwtException-t!
             userEmail = jwtService.extractUsername(jwt);
 
             if (userEmail != null && SecurityContextHolder.getContext().getAuthentication() == null) {
+
+                // --- A TRÜKK: Multi-Tenant Biztonsági Híd ---
+                // Eltároljuk az épp aktuális értéket (ha van)
+                String currentTenant = TenantContext.getCurrentTenant();
+
+                // Kényszerítjük a rendszert, hogy a felhasználót a master_db-ben keresse
+                TenantContext.setCurrentTenant(null);
+
                 UserDetails userDetails = this.userDetailsService.loadUserByUsername(userEmail);
+
+                // Ha megvan a felhasználó, visszaállítjuk az eredeti adatbázist
+                TenantContext.setCurrentTenant(currentTenant);
 
                 if (jwtService.isTokenValid(jwt, userDetails)) {
                     UsernamePasswordAuthenticationToken authToken = new UsernamePasswordAuthenticationToken(
@@ -60,18 +70,17 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                 }
             }
 
-            // Ha minden sikeresen lefutott (érvényes a token), csak akkor engedjük tovább a kérést!
+            // Ha minden sikeresen lefutott, engedjük tovább a kérést
             filterChain.doFilter(request, response);
 
         } catch (ExpiredJwtException e) {
-            // Szépen elkapjuk a lejárt token hibáját
+            // Biztonsági takarítás hiba esetén is
+            TenantContext.clear();
             response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
             response.setContentType("application/json;charset=UTF-8");
             response.getWriter().write("{\"error\": \"A munkamenet lejárt, kérlek jelentkezz be újra!\"}");
-            // Itt Nincs filterChain.doFilter(), így a kérés itt biztonságosan megáll.
-
         } catch (Exception e) {
-            // Ha bármilyen más hiba van a tokennel (pl. manipulálták)
+            TenantContext.clear();
             response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
             response.setContentType("application/json;charset=UTF-8");
             response.getWriter().write("{\"error\": \"Érvénytelen token!\"}");

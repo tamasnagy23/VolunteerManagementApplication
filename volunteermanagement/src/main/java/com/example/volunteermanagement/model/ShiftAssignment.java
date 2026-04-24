@@ -20,9 +20,9 @@ public class ShiftAssignment {
     @JoinColumn(name = "shift_id", nullable = false)
     private Shift shift;
 
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "user_id", nullable = false)
-    private User user;
+    // --- JAVÍTVA: Csak a User ID-t mentjük! ---
+    @Column(name = "user_id", nullable = false)
+    private Long userId;
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
@@ -32,7 +32,6 @@ public class ShiftAssignment {
     @Column(columnDefinition = "TEXT")
     private String message;
 
-    // --- ÚJ: Jelzi, hogy ez az ember beugró (készenléti) ---
     @Column(nullable = false)
     @Builder.Default
     private boolean isBackup = false;

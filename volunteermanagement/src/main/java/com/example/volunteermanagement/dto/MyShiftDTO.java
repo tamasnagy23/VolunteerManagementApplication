@@ -7,12 +7,13 @@ public record MyShiftDTO(
         Long shiftId,
         String eventName,
         String workAreaName,
-        String shiftName, // <-- ÚJ MEZŐ: Ez hiányzott!
+        String shiftName,
         String startTime,
         String endTime,
         String status,
         String message,
         String type,
         String description,
-        List<String> coWorkers
+        List<String> coWorkers,
+        String tenantId // <-- ÚJ MEZŐ: Ez mondja meg a Reactnak, melyik DB-hez tartozik!
 ) {}

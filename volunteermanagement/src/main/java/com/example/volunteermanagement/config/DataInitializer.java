@@ -1,4 +1,4 @@
-package com.example.volunteermanagement.config;
+/*package com.example.volunteermanagement.config;
 
 import com.example.volunteermanagement.model.*;
 import com.example.volunteermanagement.repository.*;
@@ -29,6 +29,7 @@ public class DataInitializer implements CommandLineRunner {
             Organization org = Organization.builder()
                     .name("Sziget Fesztivál Szervezőiroda")
                     .inviteCode("SZIGET2026")
+                    .tenantId("org_1")
                     .build();
             organizationRepository.save(org);
 
@@ -46,6 +47,7 @@ public class DataInitializer implements CommandLineRunner {
                     .user(organizer)
                     .organization(org)
                     .role(OrganizationRole.OWNER)
+                    .status(MembershipStatus.APPROVED)
                     .joinedAt(LocalDateTime.now())
                     .build();
             organizationMemberRepository.save(membership);
@@ -76,9 +78,51 @@ public class DataInitializer implements CommandLineRunner {
                     .name("Pultos")
                     .description("Italok kiszolgálása a nagyszínpadnál")
                     .event(szigetEvent)
+                    .capacity(10)
                     .build();
             workAreaRepository.save(bar);
 
             System.out.println("--- DEMO ADATOK LÉTREHOZVA ---");
         }
-    }}
+    }}*/
+
+package com.example.volunteermanagement.config; // Figyelj, hogy a csomagnév a tiéd legyen!
+
+import com.example.volunteermanagement.model.Role;
+import com.example.volunteermanagement.model.User;
+import com.example.volunteermanagement.repository.UserRepository;
+import lombok.RequiredArgsConstructor;
+import org.springframework.boot.CommandLineRunner;
+import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.stereotype.Component;
+
+import java.time.LocalDateTime;
+
+@Component
+@RequiredArgsConstructor
+public class DataInitializer implements CommandLineRunner {
+
+    private final UserRepository userRepository;
+    private final PasswordEncoder passwordEncoder;
+
+    @Override
+    public void run(String... args) {
+        // CSAK A RENDSZERGAZDÁT HOZZUK LÉTRE (ha még nem létezik)
+        if (userRepository.findByEmail("sysadmin@test.com").isEmpty()) {
+            User sysAdmin = User.builder()
+                    .name("Fő Rendszergazda")
+                    .email("sysadmin@test.com")
+                    .password(passwordEncoder.encode("admin123")) // Írd át, ha más volt a teszt jelszavad!
+                    .role(Role.SYS_ADMIN)
+                    .termsAcceptedAt(LocalDateTime.now())
+                    .build();
+
+            userRepository.save(sysAdmin);
+            System.out.println("✅ Mester-teszt fiók (SYS_ADMIN) sikeresen inicializálva!");
+        }
+
+        // SEMMI MÁST NEM HOZUNK LÉTRE ITT!
+        // A szervezeteket mostantól a felületen (UI) keresztül kell regisztrálni,
+        // hogy lefusson a dinamikus PostgreSQL adatbázis-generálás!
+    }
+}

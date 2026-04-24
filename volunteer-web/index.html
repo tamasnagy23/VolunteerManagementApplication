@@ -5,6 +5,29 @@
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>volunteer-web</title>
+
+    <meta name="color-scheme" content="dark light">
+    <meta name="theme-color" content="#0f172a" media="(prefers-color-scheme: dark)">
+    <meta name="theme-color" content="#e3f2fd" media="(prefers-color-scheme: light)">
+
+    <style>
+      body {
+        margin: 0;
+        padding: 0;
+        width: 100vw;
+        height: 100vh;
+        /* Alapértelmezett sötétkék háttér, ami a te témádhoz illik */
+        background-color: #0f172a;
+      }
+
+      /* Ha a mobil világos módban van, világoskék lesz azonnal */
+      @media (prefers-color-scheme: light) {
+        body {
+          background-color: #f0f9ff;
+        }
+      }
+    </style>
+
   </head>
   <body>
     <div id="root"></div>

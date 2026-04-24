@@ -11,7 +11,13 @@ import java.time.LocalDateTime;
 @NoArgsConstructor
 @AllArgsConstructor
 @Entity
-@Table(name = "organization_members")
+@Table(
+        name = "organization_members",
+        // JAVÍTÁS: Ez a sor a golyóálló mellény! Garantálja, hogy egy ember egy szervezetben csak egyetlen sorral szerepelhet.
+        uniqueConstraints = {
+                @UniqueConstraint(columnNames = {"user_id", "organization_id"})
+        }
+)
 public class OrganizationMember {
 
     @Id

@@ -8,5 +8,6 @@ public record TeamMemberDTO(
         String email,
         String globalRole,
         String phoneNumber,
+        String profileImageUrl, // <-- KÉP HOZZÁADVA IDE IS!
         List<OrgMembershipDTO> organizations
 ) {}

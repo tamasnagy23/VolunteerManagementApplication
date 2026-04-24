@@ -3,6 +3,8 @@ package com.example.volunteermanagement.model;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import jakarta.persistence.*;
 import lombok.*;
+import org.hibernate.annotations.SQLDelete;
+import org.hibernate.annotations.SQLRestriction;
 import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.userdetails.UserDetails;
@@ -12,10 +14,14 @@ import java.time.LocalDateTime;
 import java.util.*;
 
 @Entity
-@Getter @Setter // Kiváló gyakorlat a JPA-nál!
+@Getter @Setter
 @NoArgsConstructor @AllArgsConstructor
 @Builder
 @Table(name = "users")
+// --- ÚJ: LÁTHATATLANSÁG KÖPENYE ÉS PUHA TÖRLÉS ---
+@SQLDelete(sql = "UPDATE users SET deleted_at = CURRENT_TIMESTAMP WHERE id = ?")
+@SQLRestriction("deleted_at IS NULL")
+// -------------------------------------------------
 public class User implements UserDetails {
 
     @Id
@@ -30,36 +36,26 @@ public class User implements UserDetails {
     @JsonIgnore
     private String password;
 
-    // Globális jogosultság
     @Enumerated(EnumType.STRING)
     private Role role;
 
-    // --- 1. VÁLTOZÁS: ÚJ PROFIL MEZŐK ---
     private String phoneNumber;
     private String address;
 
     @Enumerated(EnumType.STRING)
     private Gender gender;
 
-    private LocalDate dateOfBirth; // java.time.LocalDate import kell hozzá!
+    private LocalDate dateOfBirth;
 
-    // GDPR és ÁSZF elfogadásának ténye (mikor fogadta el)
     private LocalDateTime termsAcceptedAt;
-    // ------------------------------------
 
-    // --- 2. VÁLTOZÁS: A RÉGI @ManyToOne KAPCSOLAT TÖRLÉSRE KERÜLT ---
-    // (A régi 'private Organization organization;' részt kivettük)
+    // --- ÚJ MEZŐ: Törlés időpontja ---
+    @Column(name = "deleted_at")
+    private LocalDateTime deletedAt;
 
-    // --- 3. VÁLTOZÁS: AZ ÚJ KAPCSOLÓTÁBLA BEKÖTÉSE ---
     @Builder.Default
     @OneToMany(mappedBy = "user", cascade = CascadeType.ALL, orphanRemoval = true)
     private List<OrganizationMember> memberships = new ArrayList<>();
-    // ----------------------------------------------------------------
-
-    @Builder.Default
-    @OneToMany(mappedBy = "user", cascade = CascadeType.ALL, orphanRemoval = true)
-    @JsonIgnore // Fontos, hogy ne legyen végtelen ciklus
-    private List<ShiftAssignment> shiftAssignments = new ArrayList<>();
 
     @Override
     public Collection<? extends GrantedAuthority> getAuthorities() {
@@ -77,7 +73,6 @@ public class User implements UserDetails {
     @Override
     public boolean isEnabled() { return true; }
 
-    // --- EZ A LÉNYEG: Csak az ID alapján egyenlő két User ---
     @Override
     public boolean equals(Object o) {
         if (this == o) return true;
@@ -91,8 +86,7 @@ public class User implements UserDetails {
         return Objects.hash(id);
     }
 
-    @Builder.Default
-    @OneToMany(mappedBy = "user", cascade = CascadeType.ALL, orphanRemoval = true)
-    @JsonIgnore
-    private List<EventTeamMember> eventRoles = new ArrayList<>();
+    // A többi mező alá...
+    @Column(name = "profile_image_url")
+    private String profileImageUrl;
 }

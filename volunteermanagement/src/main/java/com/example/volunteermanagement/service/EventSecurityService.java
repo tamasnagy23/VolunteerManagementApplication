@@ -9,6 +9,7 @@ import com.example.volunteermanagement.repository.UserRepository;
 import com.example.volunteermanagement.repository.WorkAreaRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -17,24 +18,21 @@ import java.util.stream.Collectors;
 
 @Component("eventSecurity")
 @RequiredArgsConstructor
+@Transactional(readOnly = true)
 public class EventSecurityService {
 
     private final EventTeamMemberRepository teamMemberRepository;
     private final UserRepository userRepository;
     private final WorkAreaRepository workAreaRepository;
     private final ShiftRepository shiftRepository;
-    private final EventRepository eventRepository; // <-- Ezt adtuk hozzá a gyors kereséshez!
+    private final EventRepository eventRepository;
 
-    public boolean hasPermission(String userEmail, Long eventId, String requiredPermission) {
+    // --- ÚJ METÓDUS: Biztonságos olvasási jog Koordinátoroknak is! ---
+    public boolean canViewEventData(String userEmail, Long eventId) {
         User user = userRepository.findByEmail(userEmail).orElse(null);
         if (user == null) return false;
+        if (user.getRole() != null && user.getRole().name().equals("SYS_ADMIN")) return true;
 
-        // 1. Rendszergazda mindent megtehet
-        if (user.getRole() != null && user.getRole().name().equals("SYS_ADMIN")) {
-            return true;
-        }
-
-        // 2. ÚJ: Ha a Szervezet Főszervezője/Alapítója, szintén mindent megtehet!
         Event event = eventRepository.findById(eventId).orElse(null);
         if (event != null && event.getOrganization() != null) {
             Long orgId = event.getOrganization().getId();
@@ -45,13 +43,41 @@ public class EventSecurityService {
             if (isOrgAdmin) return true;
         }
 
-        // 3. Eseménycsapat tagság vizsgálata
-        Optional<EventTeamMember> membership = teamMemberRepository.findByUserAndEventId(user, eventId);
+        Optional<EventTeamMember> membership = teamMemberRepository.findByUserIdAndEventId(user.getId(), eventId);
+        if (membership.isPresent()) {
+            EventRole role = membership.get().getRole();
+            // A Főszervező és a Koordinátor is megkapja az olvasási jogot a beosztás/jelentkező adatokhoz
+            return role == EventRole.ORGANIZER || role == EventRole.COORDINATOR;
+        }
+        return false;
+    }
+
+    public boolean hasPermission(String userEmail, Long eventId, String requiredPermission) {
+        User user = userRepository.findByEmail(userEmail).orElse(null);
+        if (user == null) return false;
+
+        if (user.getRole() != null && user.getRole().name().equals("SYS_ADMIN")) return true;
+
+        Event event = eventRepository.findById(eventId).orElse(null);
+        if (event != null && event.getOrganization() != null) {
+            Long orgId = event.getOrganization().getId();
+            boolean isOrgAdmin = user.getMemberships().stream()
+                    .anyMatch(m -> m.getOrganization().getId().equals(orgId)
+                            && m.getStatus() == MembershipStatus.APPROVED
+                            && (m.getRole() == OrganizationRole.ORGANIZER || m.getRole() == OrganizationRole.OWNER));
+            if (isOrgAdmin) return true;
+        }
+
+        Optional<EventTeamMember> membership = teamMemberRepository.findByUserIdAndEventId(user.getId(), eventId);
         if (membership.isPresent()) {
             EventTeamMember teamMember = membership.get();
-            if (teamMember.getRole() == EventRole.ORGANIZER) {
+            if (teamMember.getRole() == EventRole.ORGANIZER) return true;
+
+            // JAVÍTÁS: A Koordinátornak alapértelmezetten látnia kell az Elfogadott jelentkezőket a beosztáshoz!
+            if (teamMember.getRole() == EventRole.COORDINATOR && requiredPermission.equals("MANAGE_APPLICATIONS")) {
                 return true;
             }
+
             try {
                 EventPermission perm = EventPermission.valueOf(requiredPermission);
                 return teamMember.getPermissions().contains(perm);
@@ -59,33 +85,33 @@ public class EventSecurityService {
                 return false;
             }
         }
-
         return false;
     }
 
     public boolean canManageWorkArea(String userEmail, Long workAreaId) {
         User user = userRepository.findByEmail(userEmail).orElse(null);
         if (user == null) return false;
-
         if (user.getRole() != null && user.getRole().name().equals("SYS_ADMIN")) return true;
 
         WorkArea workArea = workAreaRepository.findById(workAreaId).orElse(null);
         if (workArea == null) return false;
 
         Long eventId = workArea.getEvent().getId();
-
         if (hasPermission(userEmail, eventId, "MANAGE_SHIFTS")) return true;
 
-        return workArea.getCoordinators().contains(user);
+        return workArea.getCoordinatorIds().contains(user.getId());
     }
 
     public boolean canManageShift(String userEmail, Long shiftId) {
+        User user = userRepository.findByEmail(userEmail).orElse(null);
+        if (user == null) return false;
+
         Shift shift = shiftRepository.findById(shiftId).orElse(null);
         if (shift == null) return false;
 
         if (shift.getType() == ShiftType.PERSONAL) {
             return shift.getAssignments().stream()
-                    .anyMatch(a -> a.getUser().getEmail().equals(userEmail));
+                    .anyMatch(a -> a.getUserId().equals(user.getId()));
         }
 
         if (shift.getWorkArea() != null) {
@@ -99,7 +125,6 @@ public class EventSecurityService {
     public boolean canCreateEventForOrg(String userEmail, Long orgId) {
         User user = userRepository.findByEmail(userEmail).orElse(null);
         if (user == null) return false;
-
         if (user.getRole() != null && user.getRole().name().equals("SYS_ADMIN")) return true;
 
         return user.getMemberships().stream()
@@ -113,12 +138,10 @@ public class EventSecurityService {
         if (user == null) return null;
 
         boolean isGlobalAdmin = user.getRole() != null && user.getRole().name().equals("SYS_ADMIN");
-
         String eventRole = null;
         List<String> permissions = new ArrayList<>();
         List<Long> coordinatedAreaIds = new ArrayList<>();
 
-        // JAVÍTVA: Az EventRepository használatával pillanatok alatt megvan a kapcsolat!
         Event event = eventRepository.findById(eventId).orElse(null);
         if (event != null && event.getOrganization() != null) {
             Long orgId = event.getOrganization().getId();
@@ -127,12 +150,10 @@ public class EventSecurityService {
                             && m.getStatus() == MembershipStatus.APPROVED
                             && (m.getRole() == OrganizationRole.ORGANIZER || m.getRole() == OrganizationRole.OWNER));
 
-            if (isOrgAdmin) {
-                eventRole = "ORGANIZER";
-            }
+            if (isOrgAdmin) eventRole = "ORGANIZER";
         }
 
-        Optional<EventTeamMember> membership = teamMemberRepository.findByUserAndEventId(user, eventId);
+        Optional<EventTeamMember> membership = teamMemberRepository.findByUserIdAndEventId(user.getId(), eventId);
         if (membership.isPresent()) {
             EventTeamMember member = membership.get();
             if (eventRole == null || member.getRole() == EventRole.ORGANIZER) {
@@ -148,7 +169,7 @@ public class EventSecurityService {
                 .collect(Collectors.toList());
 
         for (WorkArea wa : allAreasForEvent) {
-            if (wa.getCoordinators().contains(user)) {
+            if (wa.getCoordinatorIds().contains(user.getId())) {
                 coordinatedAreaIds.add(wa.getId());
             }
         }
@@ -161,17 +182,12 @@ public class EventSecurityService {
                 .build();
     }
 
-    /**
-     * Csak Globális Admin, Szervezet Tulajdonos/Főszervező, vagy az Esemény Főszervezője módosíthatja a csapatot!
-     */
     public boolean canManageEventTeam(String userEmail, Long eventId) {
         User user = userRepository.findByEmail(userEmail).orElse(null);
         if (user == null) return false;
 
-        // 1. Rendszergazda mindent megtehet
         if (user.getRole() != null && user.getRole().name().equals("SYS_ADMIN")) return true;
 
-        // 2. Szervezet Alapítója vagy Főszervezője
         Event event = eventRepository.findById(eventId).orElse(null);
         if (event != null && event.getOrganization() != null) {
             Long orgId = event.getOrganization().getId();
@@ -182,8 +198,7 @@ public class EventSecurityService {
             if (isOrgAdmin) return true;
         }
 
-        // 3. Kifejezetten erre az eseményre kinevezett Főszervező (ORGANIZER)
-        Optional<EventTeamMember> membership = teamMemberRepository.findByUserAndEventId(user, eventId);
+        Optional<EventTeamMember> membership = teamMemberRepository.findByUserIdAndEventId(user.getId(), eventId);
         return membership.isPresent() && membership.get().getRole() == EventRole.ORGANIZER;
     }
 }

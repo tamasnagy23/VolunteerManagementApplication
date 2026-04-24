@@ -14,6 +14,7 @@ import com.example.volunteermanagement.model.User;
 import com.example.volunteermanagement.repository.OrganizationMemberRepository;
 import com.example.volunteermanagement.repository.OrganizationRepository;
 import com.example.volunteermanagement.repository.UserRepository;
+import com.example.volunteermanagement.tenant.TenantContext; // <--- ÚJ IMPORT
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
@@ -35,11 +36,14 @@ public class AuthService {
     private final PasswordEncoder passwordEncoder;
     private final JwtService jwtService;
     private final AuthenticationManager authenticationManager;
-    private final AuditLogService auditLogService; // <-- ÚJ: Audit Logger behozva!
+    private final AuditLogService auditLogService;
 
-    // --- 1. ÖNKÉNTES REGISZTRÁCIÓJA ---
+    private final TenantProvisioningService tenantProvisioningService;
+
     @Transactional
     public AuthenticationResponse register(RegisterRequest request) {
+        // --- JAVÍTÁS: Kényszerítjük a Mester adatbázist ---
+        TenantContext.clear();
 
         if (!request.acceptGdpr() || !request.acceptTerms()) {
             throw new RuntimeException("Az ÁSZF és a GDPR elfogadása kötelező!");
@@ -62,13 +66,12 @@ public class AuthService {
 
         userRepository.save(user);
 
-        // --- ÚJ: REGISZTRÁCIÓ NAPLÓZÁSA ---
         auditLogService.logAction(
                 user.getEmail(),
                 "USER_REGISTERED",
                 "Saját fiók",
                 "Sikeres önkéntes regisztráció a platformra.",
-                null // Rendszerszintű esemény, nincs orgId
+                null
         );
 
         var jwtToken = jwtService.generateToken(user);
@@ -78,8 +81,10 @@ public class AuthService {
                 .build();
     }
 
-    // --- 2. BEJELENTKEZÉS ---
     public AuthenticationResponse authenticate(AuthenticationRequest request) {
+        // --- JAVÍTÁS: Kényszerítjük a Mester adatbázist a bejelentkezéshez ---
+        TenantContext.clear();
+
         authenticationManager.authenticate(
                 new UsernamePasswordAuthenticationToken(
                         request.getEmail(),
@@ -89,7 +94,6 @@ public class AuthService {
         var user = userRepository.findByEmail(request.getEmail())
                 .orElseThrow(() -> new RuntimeException("Érvénytelen email vagy jelszó"));
 
-        // --- ÚJ: BEJELENTKEZÉS NAPLÓZÁSA ---
         auditLogService.logAction(
                 user.getEmail(),
                 "USER_LOGIN",
@@ -105,9 +109,10 @@ public class AuthService {
                 .build();
     }
 
-    // --- 3. SZERVEZET ÉS TULAJDONOS REGISZTRÁLÁSA ---
     @Transactional
     public AuthenticationResponse registerOrganization(RegisterOrgRequest request) {
+        // --- JAVÍTÁS: Kényszerítjük a Mester adatbázist ---
+        TenantContext.clear();
 
         if (!request.isAcceptGdpr() || !request.isAcceptTerms()) {
             throw new RuntimeException("Az ÁSZF és a GDPR elfogadása kötelező!");
@@ -117,7 +122,6 @@ public class AuthService {
             throw new RuntimeException("Ezzel az email címmel már regisztráltak!");
         }
 
-        // Szervezet mentése
         Organization org = Organization.builder()
                 .name(request.getOrgName())
                 .address(request.getOrgAddress())
@@ -129,7 +133,24 @@ public class AuthService {
                 .build();
         Organization savedOrg = organizationRepository.save(org);
 
-        // Admin mentése
+        String sanitizedName = request.getOrgName().toLowerCase()
+                .replaceAll("[áàä]", "a").replaceAll("[éèë]", "e")
+                .replaceAll("[íìï]", "i").replaceAll("[óòöő]", "o")
+                .replaceAll("[úùüű]", "u")
+                .replaceAll("[^a-z0-9]", "_")
+                .replaceAll("_+", "_")
+                .replaceAll("^_|_$", "");
+
+        if (sanitizedName.isEmpty()) {
+            sanitizedName = "org";
+        }
+
+        String newTenantId = sanitizedName + "_" + savedOrg.getId();
+        String newDbName = newTenantId + "_db";
+
+        savedOrg.setTenantId(newTenantId);
+        savedOrg = organizationRepository.save(savedOrg);
+
         User admin = User.builder()
                 .name(request.getAdminName())
                 .email(request.getAdminEmail())
@@ -137,50 +158,43 @@ public class AuthService {
                 .role(Role.USER)
                 .termsAcceptedAt(LocalDateTime.now())
                 .build();
-        userRepository.save(admin);
+        User savedAdmin = userRepository.save(admin);
 
-        // Tagság mentése
         OrganizationMember membership = OrganizationMember.builder()
-                .user(admin)
+                .user(savedAdmin)
                 .organization(savedOrg)
                 .role(OrganizationRole.OWNER)
                 .status(MembershipStatus.APPROVED)
                 .joinedAt(LocalDateTime.now())
                 .build();
-        organizationMemberRepository.save(membership);
+        OrganizationMember savedMembership = organizationMemberRepository.save(membership);
 
-        // --- ÚJ: KOMPLEX NAPLÓZÁS ---
-        // 1. Felhasználó regisztrációja (Rendszerszintű)
-        auditLogService.logAction(
-                admin.getEmail(),
-                "USER_REGISTERED",
-                "Saját fiók",
-                "Sikeres vezetői regisztráció.",
-                null
-        );
+        tenantProvisioningService.createNewTenantDatabase(newTenantId, newDbName, savedOrg, savedAdmin, savedMembership);
 
-        // 2. Szervezet létrehozása (Szervezeti szintű)
-        auditLogService.logAction(
+        auditLogService.logAction(admin.getEmail(), "USER_REGISTERED", "Saját fiók", "Sikeres vezetői regisztráció.", null);
+
+        auditLogService.logActionWithOrgName(
                 admin.getEmail(),
                 "ORG_CREATED",
                 "Szervezet: " + savedOrg.getName(),
-                "Új szervezet regisztrálva a rendszerben.",
-                savedOrg.getId()
+                "Új szervezet regisztrálva.",
+                savedOrg.getId(),
+                savedOrg.getName()
         );
 
-        // 3. Automatikus alapítói kinevezés (Szervezeti szintű)
-        auditLogService.logAction(
+        auditLogService.logActionWithOrgName(
                 admin.getEmail(),
                 "ROLE_ASSIGNED",
                 "Automatikus kinevezés",
-                "A felhasználó megkapta az OWNER (Alapító) jogosultságot.",
-                savedOrg.getId()
+                "OWNER jogosultság megadva.",
+                savedOrg.getId(),
+                savedOrg.getName()
         );
 
-        var jwtToken = jwtService.generateToken(admin);
+        var jwtToken = jwtService.generateToken(savedAdmin);
         return AuthenticationResponse.builder()
                 .token(jwtToken)
-                .role(admin.getRole())
+                .role(savedAdmin.getRole())
                 .build();
     }
 }

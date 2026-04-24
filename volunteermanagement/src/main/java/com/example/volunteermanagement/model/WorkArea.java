@@ -4,6 +4,10 @@ import com.fasterxml.jackson.annotation.JsonBackReference;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import jakarta.persistence.*;
 import lombok.*;
+import org.hibernate.annotations.SQLDelete;
+import org.hibernate.annotations.SQLRestriction;
+
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -14,6 +18,10 @@ import java.util.List;
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
+// --- ÚJ: LÁTHATATLANSÁG KÖPENYE ÉS PUHA TÖRLÉS ---
+@SQLDelete(sql = "UPDATE work_area SET deleted_at = CURRENT_TIMESTAMP WHERE id = ?")
+@SQLRestriction("deleted_at IS NULL")
+// -------------------------------------------------
 public class WorkArea {
 
     @Id
@@ -28,6 +36,10 @@ public class WorkArea {
 
     @Column(nullable = false)
     private Integer capacity;
+
+    // --- ÚJ MEZŐ: Törlés időpontja ---
+    @Column(name = "deleted_at")
+    private LocalDateTime deletedAt;
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "event_id", nullable = false)
@@ -53,16 +65,10 @@ public class WorkArea {
     @JsonIgnore
     private List<Application> assignedApplications = new ArrayList<>();
 
-    // ... meglévő kód ...
-
     // --- ÚJ: A Munkaterület Koordinátorai ---
-    @ManyToMany
-    @JoinTable(
-            name = "work_area_coordinators",
-            joinColumns = @JoinColumn(name = "work_area_id"),
-            inverseJoinColumns = @JoinColumn(name = "user_id")
-    )
-    @Builder.Default
-    @JsonIgnore
-    private List<User> coordinators = new ArrayList<>();
+    // JAVÍTVA: Nem a User objektumot, hanem csak az ID-jukat mentjük le a Tenant DB-ben!
+    @ElementCollection(fetch = FetchType.EAGER)
+    @CollectionTable(name = "work_area_coordinators", joinColumns = @JoinColumn(name = "work_area_id"))
+    @Column(name = "user_id")
+    private List<Long> coordinatorIds = new ArrayList<>();
 }

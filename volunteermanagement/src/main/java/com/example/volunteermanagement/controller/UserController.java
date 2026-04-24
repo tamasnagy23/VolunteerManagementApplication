@@ -7,16 +7,21 @@ import com.example.volunteermanagement.repository.UserRepository;
 import com.example.volunteermanagement.service.AuditLogService;
 import com.example.volunteermanagement.service.EmailService;
 import com.example.volunteermanagement.service.UserService;
+import com.example.volunteermanagement.service.FileStorageService; // <--- ÚJ IMPORT
+import com.example.volunteermanagement.tenant.TenantContext;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile; // <--- ÚJ IMPORT
 import org.springframework.web.server.ResponseStatusException;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.security.Principal;
 import java.util.List;
+import java.util.Map; // <--- ÚJ IMPORT
 
 @RestController
 @RequestMapping("/api/users")
@@ -28,33 +33,40 @@ public class UserController {
     private final EmailService emailService;
     private final PasswordEncoder passwordEncoder;
     private final AuditLogService auditLogService;
+    private final FileStorageService fileStorageService; // <--- ÚJ: Fájlkezelő szerviz
 
     // 1. Összes felhasználó lekérése (Csak SYS_ADMIN-nak)
     @GetMapping
     @PreAuthorize("hasAuthority('SYS_ADMIN')")
+    @Transactional(readOnly = true)
     public ResponseEntity<List<User>> getAllUsers() {
         return ResponseEntity.ok(userRepository.findAll());
     }
 
     // 2. Saját profil adatai
     @GetMapping("/me")
+    @Transactional(readOnly = true)
     public ResponseEntity<com.example.volunteermanagement.dto.UserDTO> getCurrentUser(Principal principal) {
         User user = userRepository.findByEmail(principal.getName())
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Felhasználó nem található"));
         return ResponseEntity.ok(userService.getCurrentUserProfile(principal.getName()));
     }
 
-    // 3. CSAPAT LEKÉRÉSE (Minden bejelentkezett láthatja, a szűrést a Service végzi!)
+    // 3. CSAPAT LEKÉRÉSE
     @GetMapping("/team")
     @PreAuthorize("isAuthenticated()")
-    public ResponseEntity<List<TeamMemberDTO>> getTeamMembers(Principal principal) {
-        List<TeamMemberDTO> team = userService.getTeamMembers(principal.getName());
-        return ResponseEntity.ok(team);
+    @Transactional(readOnly = true)
+    public ResponseEntity<List<TeamMemberDTO>> getTeamMembers(
+            Principal principal,
+            @RequestParam(required = false) Long orgId) { // ÚJ PARAMÉTER!
+
+        return ResponseEntity.ok(userService.getTeamMembers(principal.getName(), orgId));
     }
 
     // 4. GLOBÁLIS SZEREPKÖR MÓDOSÍTÁSA (Naplózással)
     @PutMapping("/{id}/role")
     @PreAuthorize("hasAuthority('SYS_ADMIN')")
+    @Transactional
     public ResponseEntity<User> updateGlobalRole(@PathVariable Long id, @RequestParam String newRole, Principal principal) {
         User userToUpdate = userRepository.findById(id)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Felhasználó nem található"));
@@ -76,7 +88,6 @@ public class UserController {
         userToUpdate.setRole(newRoleEnum);
         User savedUser = userRepository.save(userToUpdate);
 
-        // --- NAPLÓZÁS (Rendszerszintű, orgId = null) ---
         auditLogService.logAction(
                 principal.getName(),
                 "GLOBAL_ROLE_UPDATE",
@@ -98,7 +109,6 @@ public class UserController {
             Principal principal) {
 
         try {
-            // Itt csak a szervizt hívjuk meg, a naplózást maga a UserService végzi el!
             userService.updateOrganizationRole(userId, orgId, newRole, principal.getName());
             return ResponseEntity.ok().build();
         } catch (RuntimeException e) {
@@ -106,7 +116,7 @@ public class UserController {
         }
     }
 
-    // 6. ÚJ: TAG ELTÁVOLÍTÁSA A SZERVEZETBŐL
+    // 6. TAG ELTÁVOLÍTÁSA A SZERVEZETBŐL
     @DeleteMapping("/{userId}/organizations/{orgId}")
     @PreAuthorize("isAuthenticated()")
     public ResponseEntity<Void> removeOrganizationMember(
@@ -121,33 +131,36 @@ public class UserController {
         }
     }
 
-    // Segéd record a kérés beolvasásához
-    public record BulkTeamEmailRequest(List<Long> userIds, String subject, String message) {}
+    public record BulkTeamEmailRequest(List<Long> userIds, String subject, String message, Long orgId) {}
 
     // 7. TÖMEGES EMAIL KÜLDÉS CSAPATNAK (Naplózással)
-    @PostMapping("/team/bulk-email")
+    // --- JAVÍTÁS: JSON helyett MULTIPART (FormData) fogadása! ---
+    @PostMapping(value = "/team/bulk-email", consumes = org.springframework.http.MediaType.MULTIPART_FORM_DATA_VALUE)
     @PreAuthorize("isAuthenticated()")
     public ResponseEntity<?> sendBulkTeamEmail(
-            @RequestBody BulkTeamEmailRequest request,
+            @RequestParam("userIds") List<Long> userIds,
+            @RequestParam("subject") String subject,
+            @RequestParam("message") String message,
+            @RequestParam(value = "orgId", required = false) Long requestOrgId,
+            @RequestParam(value = "attachments", required = false) List<MultipartFile> attachments, // <-- Fájlok fogadása
+            @RequestParam(required = false) Long orgId, // Eredeti orgId az URL-ből
             Principal principal) {
 
-        User admin = userRepository.findByEmail(principal.getName()).orElseThrow();
-        List<User> targetUsers = userRepository.findAllById(request.userIds());
-        List<String> bccEmails = targetUsers.stream().map(User::getEmail).toList();
+        String originalTenant = TenantContext.getCurrentTenant();
+        try {
+            TenantContext.clear();
 
-        if (!bccEmails.isEmpty()) {
-            emailService.sendBulkEmailBcc(bccEmails, request.subject(), request.message());
+            Long actualOrgId = requestOrgId != null ? requestOrgId : orgId;
 
-            // --- NAPLÓZÁS ---
-            auditLogService.logAction(
-                    principal.getName(),
-                    "TEAM_BULK_EMAIL",
-                    "Címzettek száma: " + bccEmails.size(),
-                    "Tárgy: " + request.subject(),
-                    null // Ha ez nem egy konkrét szervezethez kötött, akkor null
-            );
+            // Átadjuk az attachments-et a null helyett!
+            userService.sendTeamEmail(userIds, subject, message, actualOrgId, principal.getName(), attachments);
+
+            return ResponseEntity.ok(Map.of("message", "Csapat e-mailek elküldve."));
+        } catch (Exception e) {
+            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+        } finally {
+            TenantContext.setCurrentTenant(originalTenant);
         }
-        return ResponseEntity.ok("Csapat e-mailek elküldve.");
     }
 
     // 8. FIÓKTÖRLÉS
@@ -159,6 +172,81 @@ public class UserController {
             return ResponseEntity.ok("Fiók sikeresen törölve és anonimizálva.");
         } catch (RuntimeException e) {
             return ResponseEntity.badRequest().body(e.getMessage());
+        }
+    }
+
+    // =========================================================================
+    // 9. PROFILKÉP FELTÖLTÉSE (ÚJ VÉGPONT)
+    // =========================================================================
+    @PostMapping("/me/avatar")
+    @PreAuthorize("isAuthenticated()")
+    @Transactional
+    public ResponseEntity<?> uploadAvatar(@RequestParam("file") MultipartFile file, Principal principal) {
+        try {
+            // 1. Megkeressük a felhasználót
+            User user = userRepository.findByEmail(principal.getName())
+                    .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Felhasználó nem található"));
+
+            // 2. Lementjük a fájlt az "avatars" mappába
+            String fileUrl = fileStorageService.storeFile(file, "avatars");
+
+            // 3. Frissítjük az adatbázisban a kép URL-jét
+            user.setProfileImageUrl(fileUrl);
+            userRepository.save(user);
+
+            // 4. Visszaküldjük az új URL-t a Reactnek (egy Map-ben becsomagolva)
+            return ResponseEntity.ok(Map.of(
+                    "message", "Profilkép sikeresen frissítve!",
+                    "imageUrl", fileUrl
+            ));
+        } catch (Exception e) {
+            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+        }
+    }
+
+    // =========================================================================
+    // 10. PROFILKÉP TÖRLÉSE
+    // =========================================================================
+    @DeleteMapping("/me/avatar")
+    @PreAuthorize("isAuthenticated()")
+    @Transactional
+    public ResponseEntity<?> deleteAvatar(Principal principal) {
+        try {
+            User user = userRepository.findByEmail(principal.getName())
+                    .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Felhasználó nem található"));
+
+            // Null-ra állítjuk az URL-t az adatbázisban
+            user.setProfileImageUrl(null);
+            userRepository.save(user);
+
+            return ResponseEntity.ok(Map.of("message", "Profilkép sikeresen törölve!"));
+        } catch (Exception e) {
+            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+        }
+    }
+
+    // Segéd record a profil frissítéséhez
+    public record UpdateProfileRequest(String name, String phoneNumber) {}
+
+    // =========================================================================
+    // 11. SZEMÉLYES ADATOK (NÉV, TELEFON) FRISSÍTÉSE
+    // =========================================================================
+    @PutMapping("/me")
+    @PreAuthorize("isAuthenticated()")
+    @Transactional
+    public ResponseEntity<?> updateMyProfile(@RequestBody UpdateProfileRequest request, Principal principal) {
+        try {
+            User user = userRepository.findByEmail(principal.getName())
+                    .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Felhasználó nem található"));
+
+            user.setName(request.name());
+            user.setPhoneNumber(request.phoneNumber());
+
+            userRepository.save(user);
+
+            return ResponseEntity.ok(Map.of("message", "Személyes adatok sikeresen frissítve!"));
+        } catch (Exception e) {
+            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
         }
     }
 }

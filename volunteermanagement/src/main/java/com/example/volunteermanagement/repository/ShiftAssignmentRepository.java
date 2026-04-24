@@ -10,6 +10,6 @@ import java.util.Optional;
 
 @Repository
 public interface ShiftAssignmentRepository extends JpaRepository<ShiftAssignment, Long> {
-    List<ShiftAssignment> findByUser(User user);
+    List<ShiftAssignment> findByUserId(Long userId);
     Optional<ShiftAssignment> findByShiftIdAndUserId(Long shiftId, Long userId);
 }

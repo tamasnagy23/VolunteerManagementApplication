@@ -3,7 +3,7 @@ package com.example.volunteermanagement.dto;
 import com.fasterxml.jackson.annotation.JsonFormat;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
-import jakarta.validation.constraints.NotNull; // Fontos!
+import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
 import java.time.LocalDateTime;
 import java.util.List;
@@ -21,7 +21,6 @@ public record EventDTO(
         @NotBlank(message = "A helyszín kötelező")
         String location,
 
-        // --- ÚJ MEZŐK ---
         @NotNull(message = "A kezdés ideje kötelező")
         @JsonFormat(pattern = "yyyy-MM-dd'T'HH:mm:ss")
         LocalDateTime startTime,
@@ -29,9 +28,14 @@ public record EventDTO(
         @NotNull(message = "A befejezés ideje kötelező")
         @JsonFormat(pattern = "yyyy-MM-dd'T'HH:mm:ss")
         LocalDateTime endTime,
-        // ----------------
 
-        // Levettük a @NotEmpty-t, így lehet üres a lista (opcionális)
+        @JsonFormat(pattern = "yyyy-MM-dd'T'HH:mm:ss")
+        LocalDateTime applicationDeadline,
+
+        Boolean isRegistrationOpen,
+
+        String bannerUrl, // <--- ÚJ MEZŐ: Esemény borítóképe
+
         @Valid
         List<WorkAreaDTO> workAreas,
 
