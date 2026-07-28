@@ -18,10 +18,12 @@ import RemoveCircleOutlineIcon from '@mui/icons-material/RemoveCircleOutline';
 import AccessTimeIcon from '@mui/icons-material/AccessTime';
 import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline';
 import AddIcon from '@mui/icons-material/Add';
+import AddBusinessIcon from '@mui/icons-material/AddBusiness';
 import LoadingScreen from "./LoadingScreen.tsx";
 
-// A Kiszervezett Hírfolyam Komponens
+// A Kiszervezett Hírfolyam Komponens és az Új Modál
 import SocialFeed from '../components/SocialFeed';
+import CreateOrganizationModal from './CreateOrganizationModal';
 
 // --- INTERFÉSZEK ---
 interface Organization {
@@ -61,11 +63,14 @@ export default function Dashboard() {
     const [loading, setLoading] = useState<boolean>(true);
     const [error, setError] = useState<string>('');
 
-    // Állapotok a kereséshez és a Felfedezés Modalhoz
+    // Állapotok a kereséshez és a Modalokhoz
     const [myOrgSearch, setMyOrgSearch] = useState<string>('');
     const [discoverSearch, setDiscoverSearch] = useState<string>('');
     const [isDiscoverOpen, setIsDiscoverOpen] = useState<boolean>(false);
+    const [isCreateOrgModalOpen, setIsCreateOrgModalOpen] = useState<boolean>(false);
     const [expandedMessages, setExpandedMessages] = useState<Record<number, boolean>>({});
+    const [isLeaveModalOpen, setIsLeaveModalOpen] = useState<boolean>(false);
+    const [leaveTargetOrgId, setLeaveTargetOrgId] = useState<number | null>(null);
 
     const fetchData = async () => {
         try {
@@ -111,14 +116,17 @@ export default function Dashboard() {
         }
     };
 
-    const handleLeaveOrg = async (orgId: number) => {
-        if (!window.confirm("Biztosan ki szeretnél lépni ebből a csapatból?")) return;
+    const handleLeaveOrg = async () => {
+        if (!leaveTargetOrgId) return;
         try {
-            await api.delete(`/organization/${orgId}/leave`);
+            await api.delete(`/organizations/${leaveTargetOrgId}/leave`);
             fetchData();
         } catch (err: unknown) {
             console.error(err);
             setError("Hiba történt a kilépés során.");
+        } finally {
+            setIsLeaveModalOpen(false);
+            setLeaveTargetOrgId(null);
         }
     };
 
@@ -126,10 +134,13 @@ export default function Dashboard() {
 
     // --- LISTÁK KISZÁMOLÁSA ---
     const enrichedMemberships = useMemo(() => {
-        const memberships = (user?.memberships || []).map((m: Membership) => {
-            const orgId = m.orgId || m.organization?.id;
-            return { ...m, orgId: orgId, organization: allOrganizations.find(o => o.id === orgId) || m.organization };
-        });
+        const memberships = (user?.memberships || [])
+            .map((m: Membership) => {
+                const orgId = m.orgId || m.organization?.id;
+                return { ...m, orgId: orgId, organization: allOrganizations.find(o => o.id === orgId) || m.organization };
+            })
+            .filter((m: Membership) => m.organization != null);
+
         if (user?.role === 'SYS_ADMIN') {
             memberships.push(...allOrganizations.map((o: Organization) => ({ orgId: o.id, organization: o, status: 'APPROVED', role: 'SYS_ADMIN' })));
         }
@@ -156,10 +167,9 @@ export default function Dashboard() {
             {error && <Alert severity="error" sx={{ mb: 3, borderRadius: 3 }}>{error}</Alert>}
 
             {/* ========================================================================= */}
-            {/* MOBIL NÉZET: Vízszintes "Sztori" sáv a csapatoknak (Csak telefonon látszik) */}
+            {/* MOBIL NÉZET: Vízszintes "Sztori" sáv a csapatoknak */}
             {/* ========================================================================= */}
             <Box sx={{ display: { xs: 'flex', md: 'none' }, overflowX: 'auto', pb: 2, mb: 2, gap: 2, '&::-webkit-scrollbar': { display: 'none' } }}>
-                {/* Új csapat keresése gomb (Fixen az első) */}
                 <Box onClick={() => setIsDiscoverOpen(true)} sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1, minWidth: 72, cursor: 'pointer' }}>
                     <Avatar sx={{ width: 64, height: 64, border: '2px dashed', borderColor: 'primary.main', bgcolor: 'transparent', color: 'primary.main' }}>
                         <AddIcon fontSize="large" />
@@ -167,7 +177,13 @@ export default function Dashboard() {
                     <Typography variant="caption" fontWeight="bold" noWrap sx={{ maxWidth: 72, textAlign: 'center' }}>Felfedezés</Typography>
                 </Box>
 
-                {/* Saját csapatok */}
+                <Box onClick={() => setIsCreateOrgModalOpen(true)} sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1, minWidth: 72, cursor: 'pointer' }}>
+                    <Avatar sx={{ width: 64, height: 64, border: '2px dashed', borderColor: 'secondary.main', bgcolor: 'transparent', color: 'secondary.main' }}>
+                        <AddBusinessIcon fontSize="medium" />
+                    </Avatar>
+                    <Typography variant="caption" fontWeight="bold" color="secondary.main" noWrap sx={{ maxWidth: 72, textAlign: 'center' }}>Új Csapat</Typography>
+                </Box>
+
                 {myOrgs.map((m: Membership) => {
                     const orgId = m.orgId;
                     return (
@@ -234,16 +250,27 @@ export default function Dashboard() {
                                                         <Typography variant="caption" color="text.secondary" display="block" noWrap>{m.orgRole || m.role || 'Tag'}</Typography>
                                                     </Box>
 
-                                                    {/* Belépés és Kilépés gombok! */}
+                                                    {/* Belépés és Kilépés gombok */}
                                                     <Box display="flex" gap={0.5}>
                                                         <Tooltip title="Belépés a felületre">
                                                             <IconButton size="small" color="primary" onClick={() => orgId && handleOrgClick(orgId, m.organization?.tenantId)} sx={{ bgcolor: alpha(theme.palette.primary.main, 0.1) }}>
                                                                 <ExitToAppIcon fontSize="small" />
                                                             </IconButton>
                                                         </Tooltip>
-                                                        {user?.role !== 'SYS_ADMIN' && (
+
+                                                        {/* Kilépés gomb (kivéve alapítóknak és adminoknak) */}
+                                                        {user?.role !== 'SYS_ADMIN' && m.orgRole !== 'OWNER' && m.role !== 'OWNER' && (
                                                             <Tooltip title="Kilépés a csapatból">
-                                                                <IconButton size="small" color="error" onClick={() => orgId && handleLeaveOrg(orgId)}>
+                                                                <IconButton
+                                                                    size="small"
+                                                                    color="error"
+                                                                    onClick={() => {
+                                                                        if (orgId) {
+                                                                            setLeaveTargetOrgId(orgId);
+                                                                            setIsLeaveModalOpen(true);
+                                                                        }
+                                                                    }}
+                                                                >
                                                                     <RemoveCircleOutlineIcon fontSize="small" />
                                                                 </IconButton>
                                                             </Tooltip>
@@ -256,8 +283,8 @@ export default function Dashboard() {
                                 )}
                             </List>
 
-                            {/* Felfedezés gomb a lista alján */}
-                            <Box p={2} borderTop="1px solid" borderColor="divider" bgcolor={isDarkMode ? 'rgba(0,0,0,0.2)' : '#f8fafc'}>
+                            {/* GOMBOK A LISTA ALJÁN */}
+                            <Box p={2} borderTop="1px solid" borderColor="divider" bgcolor={isDarkMode ? 'rgba(0,0,0,0.2)' : '#f8fafc'} display="flex" flexDirection="column" gap={1.5}>
                                 <Button
                                     fullWidth variant="contained" disableElevation
                                     startIcon={<SearchIcon />} onClick={() => setIsDiscoverOpen(true)}
@@ -265,11 +292,57 @@ export default function Dashboard() {
                                 >
                                     Új közösség keresése
                                 </Button>
+
+                                <Button
+                                    fullWidth variant="outlined" color="secondary"
+                                    startIcon={<AddBusinessIcon />} onClick={() => setIsCreateOrgModalOpen(true)}
+                                    sx={{ borderRadius: 3, py: 1.2, fontWeight: 'bold', borderWidth: 2, '&:hover': { borderWidth: 2 } }}
+                                >
+                                    Új Szervezet Alapítása
+                                </Button>
                             </Box>
                         </Paper>
                     </Box>
                 </Grid>
             </Grid>
+
+            {/* ========================================================================= */}
+            {/* ÚJ SZERVEZET LÉTREHOZÁSA MODAL */}
+            {/* ========================================================================= */}
+            <CreateOrganizationModal
+                open={isCreateOrgModalOpen}
+                onClose={() => setIsCreateOrgModalOpen(false)}
+                onSuccess={() => {
+                    setIsCreateOrgModalOpen(false);
+                    fetchData();
+                }}
+            />
+
+            {/* ========================================================================= */}
+            {/* KILÉPÉS MEGERŐSÍTŐ MODAL */}
+            {/* ========================================================================= */}
+            <Dialog
+                open={isLeaveModalOpen}
+                onClose={() => setIsLeaveModalOpen(false)}
+                PaperProps={{ sx: { borderRadius: 4, p: 1, bgcolor: isDarkMode ? 'rgba(30, 41, 59, 0.98)' : '#f8fafc' } }}
+            >
+                <DialogTitle sx={{ fontWeight: '900', color: 'error.main' }}>
+                    Kilépés a csapatból
+                </DialogTitle>
+                <DialogContent>
+                    <Typography color="text.secondary">
+                        Biztosan ki szeretnél lépni ebből a szervezetből? Ezzel azonnal elveszíted a hozzáférést a belső felülethez, a hírfolyamhoz és a beosztásokhoz.
+                    </Typography>
+                </DialogContent>
+                <DialogActions sx={{ p: 2 }}>
+                    <Button onClick={() => setIsLeaveModalOpen(false)} color="inherit" sx={{ fontWeight: 'bold' }}>
+                        Mégse
+                    </Button>
+                    <Button onClick={handleLeaveOrg} variant="contained" color="error" sx={{ borderRadius: 2, fontWeight: 'bold' }} disableElevation>
+                        Igen, kilépek
+                    </Button>
+                </DialogActions>
+            </Dialog>
 
             {/* ========================================================================= */}
             {/* FELFEDEZÉS MODAL (DIALOG) */}
@@ -353,7 +426,6 @@ export default function Dashboard() {
                     <Button onClick={() => setIsDiscoverOpen(false)} sx={{ fontWeight: 'bold' }} color="inherit">Bezárás</Button>
                 </DialogActions>
             </Dialog>
-
         </Container>
     );
 }

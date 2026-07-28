@@ -61,7 +61,7 @@ public class AnnouncementService {
 
         List<Organization> masterLeaderOrgs = isSysAdmin ? organizationRepository.findAll() :
                 user.getMemberships().stream()
-                        .filter(m -> m.getStatus() == MembershipStatus.APPROVED &&
+                        .filter(m -> m.getOrganization() != null && m.getStatus() == MembershipStatus.APPROVED &&
                                 (m.getRole() == OrganizationRole.OWNER || m.getRole() == OrganizationRole.ORGANIZER))
                         .map(OrganizationMember::getOrganization).collect(Collectors.toList());
 
@@ -232,7 +232,7 @@ public class AnnouncementService {
         Set<Long> areaIds = new HashSet<>();
 
         user.getMemberships().stream()
-                .filter(m -> m.getStatus() == MembershipStatus.APPROVED)
+                .filter(m -> m.getOrganization() != null && m.getStatus() == MembershipStatus.APPROVED)
                 .forEach(m -> orgIds.add(m.getOrganization().getId()));
 
         String originalTenant = TenantContext.getCurrentTenant();

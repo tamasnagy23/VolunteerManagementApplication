@@ -1,8 +1,8 @@
 package com.example.volunteermanagement.service;
 
 import com.example.volunteermanagement.tenant.TenantContext;
-import com.example.volunteermanagement.dto.StatisticsDTO.EventStatsDTO;
-import com.example.volunteermanagement.dto.StatisticsDTO.MyStatsDTO;
+import com.example.volunteermanagement.dto.EventStatsDTO;
+import com.example.volunteermanagement.dto.MyStatsDTO;
 import com.example.volunteermanagement.model.*;
 import com.example.volunteermanagement.repository.*;
 import lombok.RequiredArgsConstructor;
@@ -28,6 +28,7 @@ public class StatisticsService {
     private final ApplicationRepository applicationRepository;
     private final ShiftRepository shiftRepository;
     private final OrganizationRepository organizationRepository;
+    private final EventRepository eventRepository;
 
     @Autowired
     @Lazy
@@ -37,13 +38,12 @@ public class StatisticsService {
     public MyStatsDTO getMyStatistics(String email) {
         User user = userRepository.findByEmail(email).orElseThrow();
 
-        // 1. Megkeressük az összes szervezetet, amihez a felhasználó tartozik
         List<Organization> userOrgs;
         if (user.getRole() == Role.SYS_ADMIN) {
             userOrgs = organizationRepository.findAll();
         } else {
             userOrgs = user.getMemberships().stream()
-                    .filter(m -> m.getStatus() == MembershipStatus.APPROVED)
+                    .filter(m -> m.getOrganization() != null && m.getStatus() == MembershipStatus.APPROVED)
                     .map(OrganizationMember::getOrganization)
                     .collect(Collectors.toList());
         }
@@ -55,14 +55,12 @@ public class StatisticsService {
         String originalTenant = TenantContext.getCurrentTenant();
 
         try {
-            // 2. Globális tér lekérdezése
             TenantContext.setCurrentTenant(null);
             MyStatsDTO globalStats = self.calculateStatsForTenant(user);
             totalCompleted += globalStats.completedShifts();
             totalUpcoming += globalStats.upcomingShifts();
-            totalHours += globalStats.totalHoursWorked(); // JAVÍTVA
+            totalHours += globalStats.totalHoursWorked();
 
-            // 3. Végigiterálunk a Szervezeteken és összeadjuk a statisztikákat
             for (Organization org : userOrgs) {
                 if (org.getTenantId() != null && !org.getTenantId().trim().isEmpty()) {
                     TenantContext.setCurrentTenant(org.getTenantId());
@@ -70,20 +68,18 @@ public class StatisticsService {
                     MyStatsDTO tenantStats = self.calculateStatsForTenant(user);
                     totalCompleted += tenantStats.completedShifts();
                     totalUpcoming += tenantStats.upcomingShifts();
-                    totalHours += tenantStats.totalHoursWorked(); // JAVÍTVA
+                    totalHours += tenantStats.totalHoursWorked();
                 }
             }
         } finally {
             TenantContext.setCurrentTenant(originalTenant);
         }
 
-        // Kerekítés 1 tizedesjegyre a legvégén
         totalHours = Math.round(totalHours * 10.0) / 10.0;
 
         return new MyStatsDTO(totalCompleted, totalHours, totalUpcoming);
     }
 
-    // ÚJ METÓDUS: Ez végzi a tényleges számolást egy adott adatbázison belül
     @Transactional(propagation = Propagation.REQUIRES_NEW, readOnly = true)
     public MyStatsDTO calculateStatsForTenant(User user) {
         List<ShiftAssignment> assignments = shiftAssignmentRepository.findByUserId(user.getId());
@@ -95,7 +91,6 @@ public class StatisticsService {
 
         for (ShiftAssignment assignment : assignments) {
             Shift shift = assignment.getShift();
-            // Kizárjuk a személyes elfoglaltságokat a statisztikából!
             if (assignment.getStatus() == AssignmentStatus.CONFIRMED && shift.getType() != ShiftType.PERSONAL) {
                 if (shift.getEndTime().isBefore(now)) {
                     completed++;
@@ -110,15 +105,60 @@ public class StatisticsService {
     }
 
     @Transactional(readOnly = true)
-    public EventStatsDTO getEventStatistics(Long eventId) {
-        // Elfogadott önkéntesek száma
+    public EventStatsDTO getEventStatistics(Long eventId, String requesterEmail) {
+        String originalTenant = TenantContext.getCurrentTenant();
+
+        try {
+            // 1. Megkeressük az eseményt a Mester adatbázisban
+            TenantContext.setCurrentTenant(null);
+
+            Event event = eventRepository.findById(eventId)
+                    .orElseThrow(() -> new RuntimeException("Esemény nem található a Mester adatbázisban!"));
+
+            Organization org = event.getOrganization();
+
+            // =====================================================================
+            // ÚJ: BIZTONSÁGI ELLENŐRZÉS (PORTÁS)
+            // =====================================================================
+            User user = userRepository.findByEmail(requesterEmail).orElseThrow();
+            boolean isSysAdmin = user.getRole() == Role.SYS_ADMIN;
+            boolean hasAccess = false;
+
+            if (org != null) {
+                hasAccess = user.getMemberships().stream()
+                        .filter(m -> m.getOrganization() != null)
+                        .anyMatch(m -> m.getOrganization().getId().equals(org.getId()) &&
+                                m.getStatus() == MembershipStatus.APPROVED &&
+                                (m.getRole() == OrganizationRole.OWNER || m.getRole() == OrganizationRole.ORGANIZER));
+            }
+
+            // Ha nem Rendszergazda és nincs vezetői joga a szervezethez, kidobjuk!
+            if (!isSysAdmin && !hasAccess) {
+                throw new RuntimeException("Nincs jogosultságod lekérdezni ennek az eseménynek a statisztikáit!");
+            }
+            // =====================================================================
+
+            // 2. Ha van saját Tenantja, átugrunk oda!
+            if (org != null && org.getTenantId() != null && !org.getTenantId().trim().isEmpty()) {
+                TenantContext.setCurrentTenant(org.getTenantId());
+                return self.fetchEventStatsInTenant(eventId);
+            }
+
+            return self.fetchEventStatsInTenant(eventId);
+
+        } finally {
+            TenantContext.setCurrentTenant(originalTenant);
+        }
+    }
+
+    @Transactional(propagation = Propagation.REQUIRES_NEW, readOnly = true)
+    public EventStatsDTO fetchEventStatsInTenant(Long eventId) {
         List<Application> approvedApps = applicationRepository.findByEventId(eventId).stream()
                 .filter(app -> app.getStatus() == ApplicationStatus.APPROVED)
                 .toList();
 
         long totalVolunteers = approvedApps.size();
 
-        // Műszakok statisztikája
         List<Shift> eventShifts = shiftRepository.findByEventId(eventId).stream()
                 .filter(s -> s.getType() == ShiftType.WORK)
                 .toList();
@@ -131,7 +171,6 @@ public class StatisticsService {
             return confirmedCount >= s.getMaxVolunteers();
         }).count();
 
-        // Munkaterületek népszerűsége (Hányan jelentkeztek egy adott területre)
         Map<String, Long> areaStats = new HashMap<>();
         for (Application app : approvedApps) {
             if (app.getAssignedWorkArea() != null) {
@@ -141,5 +180,51 @@ public class StatisticsService {
         }
 
         return new EventStatsDTO(totalVolunteers, totalShifts, fullShifts, areaStats);
+    }
+
+    // =========================================================================
+    // ÚJ: Jogosultság-alapú eseménylista lekérdezése
+    // =========================================================================
+    @Transactional(readOnly = true)
+    public List<Map<String, Object>> getManagedEvents(String requesterEmail) {
+        String originalTenant = TenantContext.getCurrentTenant();
+        try {
+            // A Mester DB-ben dolgozunk, mert ott vannak a szervezetek és az események alapadatai
+            TenantContext.setCurrentTenant(null);
+
+            User user = userRepository.findByEmail(requesterEmail).orElseThrow();
+            boolean isSysAdmin = user.getRole() == Role.SYS_ADMIN;
+
+            // 1. Összegyűjtjük az engedélyezett Szervezet ID-kat
+            List<Long> allowedOrgIds;
+            if (isSysAdmin) {
+                allowedOrgIds = organizationRepository.findAll().stream()
+                        .map(Organization::getId)
+                        .collect(Collectors.toList());
+            } else {
+                allowedOrgIds = user.getMemberships().stream()
+                        .filter(m -> m.getOrganization() != null && m.getStatus() == MembershipStatus.APPROVED &&
+                                (m.getRole() == OrganizationRole.OWNER || m.getRole() == OrganizationRole.ORGANIZER))
+                        .map(m -> m.getOrganization().getId())
+                        .collect(Collectors.toList());
+            }
+
+            if (allowedOrgIds.isEmpty()) return List.of(); // Ha nincs jogosultsága, üres listát kap
+
+            // 2. Kikeressük az eseményeket, és csak a legszükségesebb adatokat küldjük a Frontendnek (ID és Cím)
+            return eventRepository.findAll().stream()
+                    .filter(e -> e.getOrganization() != null && allowedOrgIds.contains(e.getOrganization().getId()))
+                    .map(e -> {
+                        // Explicit módon létrehozunk egy HashMap-et Object értékekkel
+                        Map<String, Object> map = new java.util.HashMap<>();
+                        map.put("id", e.getId());
+                        map.put("title", e.getTitle());
+                        return map;
+                    })
+                    .collect(Collectors.toList());
+
+        } finally {
+            TenantContext.setCurrentTenant(originalTenant);
+        }
     }
 }

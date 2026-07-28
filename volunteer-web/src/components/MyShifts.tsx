@@ -83,7 +83,6 @@ const renderDateRange = (startDateStr: string, endDateStr: string) => {
     }
 };
 
-
 export default function MyShifts() {
     const { isDarkMode } = useThemeToggle();
     const theme = useTheme();
@@ -128,6 +127,7 @@ export default function MyShifts() {
 
     useEffect(() => {
         fetchMyShifts();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
     useEffect(() => { setListPage(1); }, [currentDate, selectedEventFilter]);
@@ -138,14 +138,7 @@ export default function MyShifts() {
             const response = await api.get('/events/my-shifts');
             setShifts(response.data);
 
-            if (isInitialLoad && response.data.length > 0) {
-                const now = new Date().getTime();
-                const upcomingShifts = response.data.filter((s: MyShiftDTO) => new Date(s.endTime).getTime() > now);
-                if (upcomingShifts.length > 0) {
-                    setCurrentDate(new Date(upcomingShifts.sort((a: MyShiftDTO, b: MyShiftDTO) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime())[0].startTime));
-                } else {
-                    setCurrentDate(new Date([...response.data].sort((a: MyShiftDTO, b: MyShiftDTO) => new Date(b.startTime).getTime() - new Date(a.startTime).getTime())[0].startTime));
-                }
+            if (isInitialLoad) {
                 setIsInitialLoad(false);
             }
         } catch (error) {
@@ -154,6 +147,28 @@ export default function MyShifts() {
             setLoading(false);
         }
     };
+
+    // JAVÍTÁS: Naptár-tudatos "Következő esemény" logika
+    const nextUpcomingShift = useMemo(() => {
+        const now = new Date().getTime();
+        const currentMs = currentDate.getTime();
+
+        // Megkeressük azokat az eseményeket, amik a jelenlegi időpont után VANNAK,
+        // ÉS a naptár jelenleg mutatott dátuma után következnek (+1 másodperc ráhagyással, hogy ne ragadjon be)
+        let upcoming = shifts.filter(s => {
+            const time = new Date(s.startTime).getTime();
+            return time > now && time > currentMs + 1000;
+        });
+
+        // Ha nincs több esemény előre, akkor "körbeér", és megkeresi a legelsőt a jelenlegi (valós) időtől számítva
+        if (upcoming.length === 0) {
+            upcoming = shifts.filter(s => new Date(s.startTime).getTime() > now);
+        }
+
+        if (upcoming.length === 0) return null;
+
+        return upcoming.sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime())[0];
+    }, [shifts, currentDate]);
 
     const uniqueEvents = useMemo(() => {
         const eventsList = shifts.map(s => s.eventName).filter(name => name !== null && name !== undefined) as string[];
@@ -270,7 +285,7 @@ export default function MyShifts() {
             }
 
             if (finalStart >= finalEnd) {
-                finalEnd = new Date(finalStart.getTime() + 60 * 60 * 1000); // +1 óra ha rosszul állítják be
+                finalEnd = new Date(finalStart.getTime() + 60 * 60 * 1000);
             }
 
             const payload = { description: personalData.name, startTime: toLocalISO(finalStart), endTime: toLocalISO(finalEnd), type: 'PERSONAL', maxVolunteers: 1 };
@@ -399,11 +414,26 @@ export default function MyShifts() {
                     </Box>
 
                     <Box display="flex" justifyContent="space-between" alignItems="center" mb={2} flexWrap="wrap" gap={2}>
-                        <Box display="flex" gap={1} flexWrap="wrap">
+                        <Box display="flex" gap={1} flexWrap="wrap" alignItems="center">
                             <Chip label="Személyes (Saját)" size="small" sx={{ bgcolor: isDarkMode ? 'rgba(100, 116, 139, 0.2)' : '#f1f5f9', color: isDarkMode ? '#cbd5e1' : '#64748b', fontWeight: 700, borderRadius: 2 }} icon={<BlockIcon fontSize="small"/>} />
                             <Chip label="Gyűlés / Eligazítás" size="small" sx={{ bgcolor: isDarkMode ? 'rgba(147, 51, 234, 0.2)' : '#f3e5f5', color: isDarkMode ? '#d8b4fe' : '#9c27b0', fontWeight: 700, borderRadius: 2 }} icon={<RecordVoiceOverIcon fontSize="small"/>} />
                             <Chip label="Függőben" size="small" sx={{ bgcolor: isDarkMode ? 'rgba(234, 88, 12, 0.2)' : '#fff3e0', color: isDarkMode ? '#fdba74' : '#e65100', fontWeight: 700, borderRadius: 2 }} icon={<HelpOutlineIcon fontSize="small"/>} />
                             <Chip label="Elfogadva" size="small" sx={{ bgcolor: isDarkMode ? 'rgba(22, 163, 74, 0.2)' : '#e8f5e9', color: isDarkMode ? '#86efac' : '#2e7d32', fontWeight: 700, borderRadius: 2 }} icon={<CheckCircleOutlineIcon fontSize="small"/>} />
+
+                            {nextUpcomingShift && (
+                                <Button
+                                    size="small"
+                                    variant="outlined"
+                                    color="primary"
+                                    onClick={() => {
+                                        setCurrentDate(new Date(nextUpcomingShift.startTime));
+                                        setCalendarView('month');
+                                    }}
+                                    sx={{ borderRadius: 2, fontWeight: 'bold', ml: { xs: 0, sm: 1 }, borderStyle: 'dashed' }}
+                                >
+                                    Következő esemény ⏭
+                                </Button>
+                            )}
                         </Box>
                         {!isMobile && (
                             <Button

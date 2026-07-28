@@ -44,18 +44,23 @@ export default function Layout() {
     const { isDarkMode, toggleTheme } = useThemeToggle();
 
     const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
-    const [user, setUser] = useState<UserProfile | null>(() => {
-        const userData = localStorage.getItem('user');
-        return userData ? (JSON.parse(userData) as UserProfile) : null;
-    });
+    const [user, setUser] = useState<UserProfile | null>(null);
 
+    // --- JAVÍTÁS: Dinamikus felhasználó figyelő ---
     useEffect(() => {
-        const handleUserUpdate = () => {
+        const updateUserData = () => {
             const userData = localStorage.getItem('user');
             setUser(userData ? JSON.parse(userData) : null);
         };
-        window.addEventListener('userAvatarUpdated', handleUserUpdate);
-        return () => window.removeEventListener('userAvatarUpdated', handleUserUpdate);
+
+        updateUserData(); // Kezdeti betöltés
+        window.addEventListener('storage', updateUserData); // Más tabon történő változás
+        window.addEventListener('userAvatarUpdated', updateUserData); // Saját esemény
+
+        return () => {
+            window.removeEventListener('storage', updateUserData);
+            window.removeEventListener('userAvatarUpdated', updateUserData);
+        };
     }, []);
 
     const handleLogout = () => {
@@ -78,7 +83,7 @@ export default function Layout() {
 
     const navItems = useMemo(() => {
         const items = [
-            { label: 'Események', path: '/dashboard', icon: <DashboardIcon /> },
+            { label: 'Hírfolyam', path: '/dashboard', icon: <DashboardIcon /> },
             { label: 'Műszakjaim', path: '/my-shifts', icon: <EventRepeatIcon /> },
             { label: 'Statisztikák', path: '/statistics', icon: <BarChartIcon /> },
         ];
@@ -208,7 +213,6 @@ export default function Layout() {
                                     color: isDarkMode ? 'white' : 'primary.main',
                                     opacity: isRootPage ? 0 : 1,
                                     pointerEvents: isRootPage ? 'none' : 'auto',
-                                    // JAVÍTÁS: Szép "beúszó" effekt a nyílnak
                                     transform: isRootPage ? 'scale(0.8) translateX(-20px)' : 'scale(1) translateX(0)',
                                     transition: 'opacity 0.3s ease, transform 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94)',
                                     willChange: 'opacity, transform'
@@ -218,7 +222,7 @@ export default function Layout() {
                             </IconButton>
                         </Box>
 
-                        {/* --- KÖZÉP: Cím (SZIGORÚAN CSAK GPU ANIMÁCIÓ) --- */}
+                        {/* --- KÖZÉP: Cím --- */}
                         <Typography
                             variant="h6"
                             fontWeight="900"
@@ -227,10 +231,8 @@ export default function Layout() {
                                 cursor: 'pointer',
                                 letterSpacing: '-1px',
                                 color: isDarkMode ? 'white' : 'primary.main',
-                                // Fixen lerögzítjük középre
                                 position: 'absolute',
                                 left: '50%',
-                                // A Varázslat: Ha a gyökér oldalon van, a videókártya segítségével eltoljuk a bal szélre (16px a mobil margin). Ha aloldalon, akkor a saját szélességének felével (-50%) pontosan középre igazítjuk.
                                 transform: isRootPage
                                     ? { xs: 'translateX(calc(16px - 50vw))', md: 'translateX(calc(32px - 50vw))' }
                                     : 'translateX(-50%)',
@@ -238,10 +240,10 @@ export default function Layout() {
                                 fontSize: { xs: '1.2rem', sm: '1.25rem' },
                                 whiteSpace: 'nowrap',
                                 zIndex: 5,
-                                willChange: 'transform' // Megtiltjuk a layout újraszámolást, csak GPU-t használ
+                                willChange: 'transform'
                             }}
                         >
-                            VOLUNTEER<span style={{ color: isDarkMode ? '#818cf8' : '#f59e0b' }}>APP</span>
+                            VOLUNTEER<span style={{ color: isDarkMode ? '#818cf8' : '#000000' }}>APP</span>
                         </Typography>
 
                         {/* --- JOBB OLDAL: Ikonok és Asztali Menü --- */}

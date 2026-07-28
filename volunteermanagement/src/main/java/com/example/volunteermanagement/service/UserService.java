@@ -102,7 +102,7 @@ public class UserService {
                     java.util.Map<Long, OrgMembershipDTO> uniqueOrgs = new java.util.HashMap<>();
 
                     user.getMemberships().stream()
-                            .filter(m -> m.getStatus() == MembershipStatus.APPROVED)
+                            .filter(m -> m.getOrganization() != null && m.getStatus() == MembershipStatus.APPROVED)
                             .forEach(m -> {
                                 uniqueOrgs.putIfAbsent(m.getOrganization().getId(), new OrgMembershipDTO(
                                         m.getOrganization().getId(),
@@ -243,6 +243,7 @@ public class UserService {
                 .orElseThrow(() -> new RuntimeException("Felhasználó nem található"));
 
         List<OrgMembershipDTO> memberships = user.getMemberships().stream()
+                .filter(m -> m.getOrganization() != null)
                 .map(m -> new OrgMembershipDTO(
                         m.getOrganization().getId(),
                         m.getOrganization().getName(),
@@ -254,7 +255,7 @@ public class UserService {
                 .collect(Collectors.toList());
 
         int activeOrgs = (int) user.getMemberships().stream()
-                .filter(m -> m.getStatus() == MembershipStatus.APPROVED)
+                .filter(m -> m.getOrganization() != null && m.getStatus() == MembershipStatus.APPROVED)
                 .count();
 
         List<Application> completedApps = applicationRepository.findCompletedApplicationsByUser(user.getId());

@@ -1,5 +1,6 @@
 package com.example.volunteermanagement.controller;
 
+import com.example.volunteermanagement.config.JwtService;
 import com.example.volunteermanagement.dto.OrganizationDTO;
 import com.example.volunteermanagement.dto.PendingApplicationDTO;
 import com.example.volunteermanagement.model.MembershipStatus;
@@ -13,6 +14,7 @@ import com.example.volunteermanagement.service.FileStorageService;
 import com.example.volunteermanagement.service.OrganizationService;
 import com.example.volunteermanagement.tenant.TenantContext;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -32,10 +34,11 @@ import java.util.Map;
 public class OrganizationController {
 
     private final OrganizationService organizationService;
-
     private final UserRepository userRepository;
     private final OrganizationRepository organizationRepository;
     private final FileStorageService fileStorageService;
+    @Autowired
+    private final JwtService jwtService;
 
     @GetMapping
     public ResponseEntity<List<OrganizationDTO>> getAllOrganizations() {
@@ -99,7 +102,6 @@ public class OrganizationController {
         }
     }
 
-    // --- JAVÍTÁS: A removeMember most már fogadja és átadja a 'reason' (indoklás) paramétert! ---
     @DeleteMapping("/{orgId}/members/{userId}")
     @PreAuthorize("isAuthenticated()")
     public ResponseEntity<?> removeMember(
@@ -152,7 +154,7 @@ public class OrganizationController {
     }
 
     // =========================================================================
-    // LOGÓ FELTÖLTÉSE
+    // LOGÓ FELTÖLTÉSE / TÖRLÉSE
     // =========================================================================
     @PostMapping("/{id}/logo")
     @PreAuthorize("isAuthenticated()")
@@ -190,9 +192,6 @@ public class OrganizationController {
         }
     }
 
-    // =========================================================================
-    // LOGÓ TÖRLÉSE
-    // =========================================================================
     @DeleteMapping("/{id}/logo")
     @PreAuthorize("isAuthenticated()")
     @Transactional
@@ -225,7 +224,7 @@ public class OrganizationController {
     }
 
     // =========================================================================
-    // ÚJ: BORÍTÓKÉP (BANNER) FELTÖLTÉSE
+    // BORÍTÓKÉP (BANNER) FELTÖLTÉSE / TÖRLÉSE
     // =========================================================================
     @PostMapping("/{id}/banner")
     @PreAuthorize("isAuthenticated()")
@@ -251,7 +250,7 @@ public class OrganizationController {
                 return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", "Nincs jogosultságod a szervezet borítóképének módosításához!"));
             }
 
-            String fileUrl = fileStorageService.storeFile(file, "banners"); // Mentsük a "banners" mappába
+            String fileUrl = fileStorageService.storeFile(file, "banners");
             org.setBannerUrl(fileUrl);
             organizationRepository.save(org);
 
@@ -263,9 +262,6 @@ public class OrganizationController {
         }
     }
 
-    // =========================================================================
-    // ÚJ: BORÍTÓKÉP (BANNER) TÖRLÉSE
-    // =========================================================================
     @DeleteMapping("/{id}/banner")
     @PreAuthorize("isAuthenticated()")
     @Transactional
@@ -312,7 +308,6 @@ public class OrganizationController {
         }
     }
 
-    // --- JAVÍTOTT: Visszaállítás végpont (Membership ID alapján) ---
     @PutMapping("/memberships/{membershipId}/restore")
     @PreAuthorize("isAuthenticated()")
     public ResponseEntity<?> restoreMember(
@@ -327,5 +322,53 @@ public class OrganizationController {
         } finally {
             TenantContext.setCurrentTenant(originalTenant);
         }
+    }
+
+    // =========================================================================
+    // SZERVEZET LÉTREHOZÁSA MEGLÉVŐ FELHASZNÁLÓNAK (DÖNTÉSHOZÓ PARAMÉTERREL)
+    // =========================================================================
+    @PostMapping
+    @PreAuthorize("isAuthenticated()")
+    public ResponseEntity<?> createOrganization(
+            @RequestBody OrganizationDTO dto,
+            @RequestParam(required = false) Boolean forceCreateNew,
+            Principal principal) {
+
+        // 1. Létrehozzuk/visszaállítjuk a szervezetet a service-ben
+        OrganizationDTO createdOrg = organizationService.createOrganization(dto, principal.getName(), forceCreateNew);
+
+        // 2. Kikérjük a frissített felhasználót a módosult tagságokkal a Master DB-ből
+        User user = userRepository.findByEmail(principal.getName()).orElseThrow();
+
+        // 3. Generálunk egy vadonatúj JWT tokent a friss claims-ekkel
+        String freshToken = jwtService.generateToken(user);
+
+        // 4. Visszaküldjük mindkettőt egy Map-ben
+        return ResponseEntity.status(HttpStatus.CREATED).body(Map.of(
+                "organization", createdOrg,
+                "token", freshToken
+        ));
+    }
+
+    // =========================================================================
+    // SZERVEZET TÖRLÉSE (SOFT DELETE) FRISSÍTETT TOKENNEL
+    // =========================================================================
+    @DeleteMapping("/{id}")
+    @PreAuthorize("isAuthenticated()")
+    public ResponseEntity<?> deleteOrganization(@PathVariable Long id, Principal principal) {
+        // 1. Logikai törlés végrehajtása
+        organizationService.softDeleteOrganization(id, principal.getName());
+
+        // 2. Felhasználó kikérése a frissített tagságokkal
+        User user = userRepository.findByEmail(principal.getName()).orElseThrow();
+
+        // 3. Új JWT token generálása (amiben már nincs benne az OWNER jog ehhez a szervezethez)
+        String freshToken = jwtService.generateToken(user);
+
+        // 4. Visszaküldjük a sikeres üzenetet ÉS az új tokent
+        return ResponseEntity.ok(Map.of(
+                "message", "A szervezet sikeresen törölve lett.",
+                "token", freshToken
+        ));
     }
 }

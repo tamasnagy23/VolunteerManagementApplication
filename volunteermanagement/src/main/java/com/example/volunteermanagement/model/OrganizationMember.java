@@ -3,6 +3,8 @@ package com.example.volunteermanagement.model;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import jakarta.persistence.*;
 import lombok.*;
+import org.hibernate.annotations.NotFound;
+import org.hibernate.annotations.NotFoundAction;
 
 import java.time.LocalDateTime;
 
@@ -32,6 +34,7 @@ public class OrganizationMember {
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "organization_id", nullable = false)
     @JsonIgnore
+    @NotFound(action = NotFoundAction.IGNORE)
     private Organization organization;
 
     @Enumerated(EnumType.STRING)

@@ -103,7 +103,7 @@ public class AuditLogService {
             var u = userOpt.get();
             if (u.getRole() != com.example.volunteermanagement.model.Role.SYS_ADMIN) {
                 return u.getMemberships().stream()
-                        .filter(m -> m.getStatus() == com.example.volunteermanagement.model.MembershipStatus.APPROVED &&
+                        .filter(m -> m.getOrganization() != null && m.getStatus() == com.example.volunteermanagement.model.MembershipStatus.APPROVED &&
                                 (m.getRole() == com.example.volunteermanagement.model.OrganizationRole.OWNER ||
                                         m.getRole() == com.example.volunteermanagement.model.OrganizationRole.ORGANIZER))
                         .map(m -> m.getOrganization().getId())

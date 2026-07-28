@@ -68,7 +68,7 @@ public class EventService {
             }
         } else {
             org = creator.getMemberships().stream()
-                    .filter(m -> m.getStatus() == MembershipStatus.APPROVED &&
+                    .filter(m -> m.getOrganization() != null && m.getStatus() == MembershipStatus.APPROVED &&
                             (m.getRole() == OrganizationRole.OWNER || m.getRole() == OrganizationRole.ORGANIZER))
                     .map(OrganizationMember::getOrganization).findFirst()
                     .orElse(null);
@@ -117,7 +117,6 @@ public class EventService {
 
         auditLogService.logAction(creatorEmail, "EVENT_CREATED", "Esemény: " + savedEvent.getTitle(), "Új esemény létrehozva.", org.getId());
 
-        // JAVÍTÁS: Itt is DTO-t adunk vissza!
         return convertToDTO(savedEvent);
     }
 
@@ -141,7 +140,7 @@ public class EventService {
                 targetOrgs = organizationRepository.findAll();
             } else {
                 targetOrgs = user.getMemberships().stream()
-                        .filter(m -> m.getStatus() == MembershipStatus.APPROVED)
+                        .filter(m -> m.getOrganization() != null && m.getStatus() == MembershipStatus.APPROVED)
                         .map(OrganizationMember::getOrganization)
                         .collect(Collectors.toList());
             }
@@ -177,7 +176,7 @@ public class EventService {
                         org != null ? new OrganizationDTO(
                                 org.getId(), org.getName(), org.getTenantId(),
                                 org.getAddress(), org.getDescription(), org.getEmail(), org.getPhone(),
-                                org.getLogoUrl(), org.getBannerUrl()
+                                org.getLogoUrl(), org.getBannerUrl(), org.getCui() // <-- FIX: Added getCui()
                         ) : null
                 );
             });
@@ -211,7 +210,7 @@ public class EventService {
                         org != null ? new OrganizationDTO(
                                 org.getId(), org.getName(), org.getTenantId(),
                                 org.getAddress(), org.getDescription(), org.getEmail(), org.getPhone(),
-                                org.getLogoUrl(), org.getBannerUrl()
+                                org.getLogoUrl(), org.getBannerUrl(), org.getCui() // <-- FIX: Added getCui()
                         ) : null
                 );
             });
@@ -264,11 +263,10 @@ public class EventService {
     }
 
     @Transactional
-    public EventDTO updateEvent(Long id, EventDTO dto, String requesterEmail) { // <--- Visszatérési típus EventDTO
+    public EventDTO updateEvent(Long id, EventDTO dto, String requesterEmail) {
         Event event = eventRepository.findById(id).orElseThrow();
         Long orgId = event.getOrganization().getId();
 
-        // Itt van a korábbi jó szűrésünk a személyes elfoglaltságokra
         List<Shift> existingShifts = shiftRepository.findByEventId(id).stream()
                 .filter(shift -> shift.getWorkArea() != null)
                 .collect(Collectors.toList());
@@ -336,7 +334,6 @@ public class EventService {
 
         auditLogService.logAction(requesterEmail, "EVENT_UPDATED", "Esemény: " + updatedEvent.getTitle(), "Módosult.", orgId);
 
-        // JAVÍTÁS: Nyers entitás helyett tiszta JSON barát DTO-t adunk vissza!
         return convertToDTO(updatedEvent);
     }
 
@@ -360,7 +357,7 @@ public class EventService {
                 event.getBannerUrl(),
                 event.getWorkAreas().stream().map(wa -> new WorkAreaDTO(wa.getId(), wa.getName(), wa.getDescription(), wa.getCapacity(), List.of())).toList(),
                 event.getQuestions().stream().map(q -> new EventQuestionDTO(q.getId(), q.getQuestionText(), q.getQuestionType(), q.getOptions(), q.isRequired())).toList(),
-                new OrganizationDTO(event.getOrganization().getId(), event.getOrganization().getName(), event.getOrganization().getTenantId(), event.getOrganization().getAddress(), event.getOrganization().getDescription(), event.getOrganization().getEmail(), event.getOrganization().getPhone(), event.getOrganization().getLogoUrl(), event.getOrganization().getBannerUrl())
+                new OrganizationDTO(event.getOrganization().getId(), event.getOrganization().getName(), event.getOrganization().getTenantId(), event.getOrganization().getAddress(), event.getOrganization().getDescription(), event.getOrganization().getEmail(), event.getOrganization().getPhone(), event.getOrganization().getLogoUrl(), event.getOrganization().getBannerUrl(), event.getOrganization().getCui()) // <-- FIX: Added getCui()
         );
     }
 
@@ -372,7 +369,7 @@ public class EventService {
                 event.getBannerUrl(),
                 event.getWorkAreas().stream().map(wa -> new WorkAreaDTO(wa.getId(), wa.getName(), wa.getDescription(), wa.getCapacity(), List.of())).toList(),
                 event.getQuestions().stream().map(q -> new EventQuestionDTO(q.getId(), q.getQuestionText(), q.getQuestionType(), q.getOptions(), q.isRequired())).toList(),
-                new OrganizationDTO(org.getId(), org.getName(), org.getTenantId(), org.getAddress(), org.getDescription(), org.getEmail(), org.getPhone(), org.getLogoUrl(), org.getBannerUrl())
+                new OrganizationDTO(org.getId(), org.getName(), org.getTenantId(), org.getAddress(), org.getDescription(), org.getEmail(), org.getPhone(), org.getLogoUrl(), org.getBannerUrl(), org.getCui()) // <-- FIX: Added getCui()
         );
     }
 
@@ -564,12 +561,8 @@ public class EventService {
         return eventRepository.findAll();
     }
 
-    // =======================================================================
-    // JAVÍTVA: ELÉRHETŐSÉGEK / KAPCSOLATTARTÓK LEKÉRÉSE (DUPLA TRANZAKCIÓVAL)
-    // =======================================================================
     public List<Map<String, Object>> getEventContacts(Long eventId) {
 
-        // 1. FÁZIS: Adatok kinyerése a Tenant (Szervezet) adatbázisából egy dedikált tranzakcióban
         Map<String, Object> tenantData = transactionTemplate.execute(status -> {
             Event event = eventRepository.findById(eventId).orElseThrow(() -> new RuntimeException("Esemény nem található"));
             Long orgId = event.getOrganization().getId();
@@ -601,14 +594,11 @@ public class EventService {
         String originalTenant = TenantContext.getCurrentTenant();
 
         try {
-            // 2. FÁZIS: VÁLTÁS A MASTER ADATBÁZISRA!
             TenantContext.setCurrentTenant(null);
 
-            // ÚJ TRANZAKCIÓ NYITÁSA A MASTERBEN (Itt vannak a telefonok és a valódi Alapítók!)
             transactionTemplate.execute(status -> {
                 List<Long> addedUserIds = new ArrayList<>();
 
-                // A) Szervezet Alapítók és Szervezők (Az igazi Főszervezők)
                 Organization masterOrg = organizationRepository.findById(orgId).orElse(null);
                 if (masterOrg != null && masterOrg.getMembers() != null) {
                     Hibernate.initialize(masterOrg.getMembers());
@@ -630,7 +620,6 @@ public class EventService {
                     }
                 }
 
-                // B) A Tenantból áthozott Koordinátorok adatainak kiegészítése
                 for (Long coordId : coordinatorAreaMap.keySet()) {
                     if (!addedUserIds.contains(coordId)) {
                         User u = userRepository.findById(coordId).orElse(null);
@@ -651,7 +640,6 @@ public class EventService {
             });
 
         } finally {
-            // 3. Visszaváltás a Tenant adatbázisra
             TenantContext.setCurrentTenant(originalTenant);
         }
 

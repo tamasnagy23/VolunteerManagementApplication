@@ -50,6 +50,14 @@ export default function CustomCalendar({
     const [selectedDate, setSelectedDate] = useState<Date>(currentDate);
     const [now, setNow] = useState(new Date());
 
+    // =========================================================================
+    // ÚJ: Ha a MyShifts-ből ugrunk egy dátumra, a naptár belső "kiválasztott napját" is szinkronizáljuk!
+    // =========================================================================
+    useEffect(() => {
+        setSelectedDate(currentDate);
+    }, [currentDate]);
+    // =========================================================================
+
     useEffect(() => {
         const timer = setInterval(() => setNow(new Date()), 60000);
         return () => clearInterval(timer);
@@ -276,22 +284,23 @@ export default function CustomCalendar({
 
             <Box display="flex" justifyContent="space-between" alignItems="center" mb={isMobile ? 1 : 2} position="relative" width="100%">
                 {isMobile ? (
-                    <Box position="relative" display="flex" justifyContent="center" alignItems="center" width="100%" pt={1} pb={1}>
-                        <Box position="absolute" left={0}>
+                    <Box display="grid" gridTemplateColumns="1fr auto 1fr" alignItems="center" width="100%" pt={1} pb={1} gap={0.5}>
+                        <Box display="flex" justifyContent="flex-start">
                             <Button
                                 variant="contained" disableElevation onClick={handleToday}
-                                sx={{ borderRadius: '24px', px: 2, minWidth: '40px', py: 0.5, fontWeight: 'bold', textTransform: 'none', bgcolor: isDarkMode ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.05)', color: isDarkMode ? 'white' : 'text.primary', '&:hover': { bgcolor: isDarkMode ? 'rgba(255,255,255,0.15)' : 'rgba(0,0,0,0.1)' } }}
+                                sx={{ borderRadius: '24px', px: {xs: 1.5, sm: 2}, minWidth: '40px', py: 0.5, fontWeight: 'bold', textTransform: 'none', bgcolor: isDarkMode ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.05)', color: isDarkMode ? 'white' : 'text.primary', '&:hover': { bgcolor: isDarkMode ? 'rgba(255,255,255,0.15)' : 'rgba(0,0,0,0.1)' } }}
                             >
                                 Ma
                             </Button>
                         </Box>
-                        <Box display="flex" justifyContent="center" alignItems="center">
-                            <IconButton onClick={handlePrev} size="small" sx={{ bgcolor: isDarkMode ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)', mx: 1 }}><ChevronLeftIcon /></IconButton>
-                            <Typography variant="h6" fontWeight="900" sx={{ textTransform: 'lowercase', px: 0.5, minWidth: 130, textAlign: 'center', color: isDarkMode ? 'white' : 'primary.main', fontSize: '1.25rem', whiteSpace: 'nowrap' }}>
+                        <Box display="flex" justifyContent="center" alignItems="center" minWidth={0}>
+                            <IconButton onClick={handlePrev} size="small" sx={{ bgcolor: isDarkMode ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)', mx: { xs: 0.25, sm: 1 } }}><ChevronLeftIcon /></IconButton>
+                            <Typography variant="h6" fontWeight="900" noWrap sx={{ textTransform: 'lowercase', px: 0.5, textAlign: 'center', color: isDarkMode ? 'white' : 'primary.main', fontSize: { xs: '1.1rem', sm: '1.25rem' } }}>
                                 {getHeaderLabel()}
                             </Typography>
-                            <IconButton onClick={handleNext} size="small" sx={{ bgcolor: isDarkMode ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)', mx: 1 }}><ChevronRightIcon /></IconButton>
+                            <IconButton onClick={handleNext} size="small" sx={{ bgcolor: isDarkMode ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)', mx: { xs: 0.25, sm: 1 } }}><ChevronRightIcon /></IconButton>
                         </Box>
+                        <Box /> {/* Üres doboz a jobb oldalon, hogy a rács garantáltan középen tartsa a hónapot */}
                     </Box>
                 ) : (
                     <>

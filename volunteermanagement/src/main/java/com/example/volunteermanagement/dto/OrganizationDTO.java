@@ -9,5 +9,6 @@ public record OrganizationDTO(
         String email,
         String phone,
         String logoUrl,
-        String bannerUrl // <--- JAVÍTÁS: Borítókép mező hozzáadva
+        String bannerUrl, // <--- JAVÍTÁS: Borítókép mező hozzáadva
+        String cui
 ) {}

@@ -56,10 +56,10 @@ interface PieLabelProps {
     percent?: number;
 }
 
-interface RawEvent {
-    id: number;
-    title: string;
-}
+//interface RawEvent {
+    //id: number;
+    //title: string;
+//}
 
 const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#f97316', '#8b5cf6', '#ec4899', '#06b6d4'];
 
@@ -117,12 +117,10 @@ export default function Statistics() {
             setIsOrganizer(hasOrganizerRights);
 
             if (hasOrganizerRights) {
-                const evRes = await api.get('/events?size=50');
-                if (evRes.data && evRes.data.content) {
-                    const mappedEvents = evRes.data.content.map((e: RawEvent) => {
-                        return { id: e.id, title: e.title };
-                    });
-                    setEvents(mappedEvents);
+                // JAVÍTÁS: Átálltunk a dedikált, jogosultság-alapú végpontra!
+                const evRes = await api.get('/statistics/managed-events');
+                if (evRes.data) {
+                    setEvents(evRes.data); // A backend már csak {id, title} objektumokat küld
                 }
             }
 
@@ -215,7 +213,7 @@ export default function Statistics() {
         <Fade in={true} timeout={500}>
             <Container maxWidth="lg" sx={{ mt: { xs: 2, md: 4 }, mb: 10 }}>
                 <Typography variant="h4" fontWeight="900" color={isDarkMode ? 'primary.light' : 'primary.main'} mb={1} sx={{ fontSize: { xs: '2rem', sm: '2.5rem' }, letterSpacing: '-0.5px' }}>
-                    Statisztikák 📊
+                    Statisztikák
                 </Typography>
                 <Typography variant="body1" color="text.secondary" mb={4}>
                     Kövesd nyomon {shouldShowMyStats ? 'a saját teljesítményedet és ' : ''}az események alakulását!

@@ -328,7 +328,7 @@ export default function Register() {
                         <TextField fullWidth label="Adószám / CUI" name="orgCui" value={formData.orgCui} onChange={handleChange} required sx={{ '& .MuiOutlinedInput-root': { borderRadius: 3, bgcolor: inputBgColor } }} />
                         <TextField fullWidth label="Szervezet bemutatkozása / Leírás" name="orgDescription" value={formData.orgDescription} onChange={handleChange} multiline rows={3} placeholder="Rövid leírás a szervezet céljairól..." required sx={{ '& .MuiOutlinedInput-root': { borderRadius: 3, bgcolor: inputBgColor } }} />
                         <Box sx={{ display: 'flex', gap: 2, flexDirection: { xs: 'column', sm: 'row' } }}>
-                            <TextField fullWidth label="Kapcsolattartó Email" name="orgEmail" type="email" value={formData.orgEmail} onChange={handleChange} required sx={{ '& .MuiOutlinedInput-root': { borderRadius: 3, bgcolor: inputBgColor } }} />
+                            <TextField fullWidth label="Szervezet email címe" name="orgEmail" type="email" value={formData.orgEmail} onChange={handleChange} required sx={{ '& .MuiOutlinedInput-root': { borderRadius: 3, bgcolor: inputBgColor } }} />
                             <TextField fullWidth label="Telefonszám" name="orgPhone" type="tel" value={formData.orgPhone} onChange={handleChange} placeholder="+36 30 123 4567" sx={{ '& .MuiOutlinedInput-root': { borderRadius: 3, bgcolor: inputBgColor } }} />
                         </Box>
                     </Box>

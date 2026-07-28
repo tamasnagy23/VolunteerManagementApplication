@@ -166,7 +166,7 @@ public class ShiftService {
             userOrgs = organizationRepository.findAll();
         } else {
             userOrgs = user.getMemberships().stream()
-                    .filter(m -> m.getStatus() == MembershipStatus.APPROVED)
+                    .filter(m -> m.getOrganization() != null && m.getStatus() == MembershipStatus.APPROVED)
                     .map(OrganizationMember::getOrganization)
                     .collect(Collectors.toList());
         }
