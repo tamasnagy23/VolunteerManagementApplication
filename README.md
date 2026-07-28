@@ -1,9 +1,9 @@
 # Volunteer Management Application
 
-> 🚧 **Work in Progress:** This project is currently under active development. The core backend structure (RBAC, API endpoints) and the initial React frontend are set up. I am continuously refactoring, adding new UI components, and expanding features.
+> 🚧 **Work in Progress:** This project is currently under active development. The core backend structure, including a robust Multi-Tenant architecture, advanced RBAC, and the React frontend, is established. I am continuously refining the UI, adding complex management features, and optimizing database interactions.
 
 ## 📌 Overview
-This is a Full-Stack Volunteer Management Application designed to connect volunteers with events while providing organizers with powerful management tools. It features a robust RESTful API backend built with Java Spring Boot and a modern, interactive frontend built with React, TypeScript, and Material UI.
+This is an Enterprise-Grade Full-Stack Volunteer Management Application designed to seamlessly connect volunteers with events while providing organizers with powerful, context-aware management tools. It features a highly scalable RESTful API backend built with Java Spring Boot (utilizing multi-tenancy) and a modern, interactive frontend built with React, TypeScript, and Material UI.
 
 ## 🛠️ Tech Stack
 
@@ -12,23 +12,24 @@ This is a Full-Stack Volunteer Management Application designed to connect volunt
 * **Language:** TypeScript
 * **UI Library:** Material UI (MUI)
 * **Routing:** React Router DOM
+* **Rich Text & Media:** `react-quill-new` (Rich text editor), custom interactive Lightbox for images
 * **State Management & Network:** Axios for secure API communication
-* **Extra Features:** `react-big-calendar` (for event scheduling views), `xlsx` (for data export/import)
+* **Extra Features:** `react-big-calendar` (for scheduling), `xlsx` (data export/import)
 
 ### Backend
 * **Language:** Java 17
 * **Framework:** Spring Boot 3.2.2
-* **Database:** PostgreSQL (with Spring Data JPA)
+* **Database:** PostgreSQL (Spring Data JPA) with **Multi-Tenant Architecture** (Master DB + Isolated Tenant DBs)
 * **Security:** Spring Security & JWT (JSON Web Tokens)
 * **Build Tool:** Maven
 
 ## ✨ Key Features
-* **Interactive Dashboard:** A user-friendly frontend built with Material UI, allowing users to seamlessly apply for events and admins to manage applications visually.
-* **Complex Event Application Logic:** Volunteers can apply for specific work areas within events, answer dynamic questionnaires, and view their schedules.
-* **Role-Based Access Control (RBAC):** Strict authorization checks on both frontend (route protection) and backend, distinguishing between Global Admins, Organizers, and regular Volunteers.
-* **Event Calendar:** Visual representation of events and shifts using React Big Calendar.
-* **Bulk Operations & Excel Integration:** Admins can perform bulk status updates, send mass BCC emails, and potentially export data.
-* **Comprehensive Audit Logging:** Every major action is tracked and logged securely on the backend.
+* **Multi-Tenant Architecture:** Data isolation ensures that different organizations can operate securely within their own database schemas or instances while maintaining a unified global identity.
+* **Context-Aware RBAC (Role-Based Access Control):** A highly dynamic permission system that distinguishes roles not just globally (SysAdmin, User), but contextually (Organization Owner, Event Organizer, Area Coordinator), dynamically updating UI tools and API access based on the user's scope.
+* **Interactive Social Feed:** A built-in communication hub allowing targeted announcements (Global, Org-wide, Event-specific, or Team-specific). Features include rich text, multiple image uploads with gallery view, nested recursive commenting, and emoji reactions.
+* **Complex Shift & Event Logic:** Organizers can manage nested structures (Organizations ➔ Events ➔ Work Areas ➔ Shifts). The system features automatic conflict detection for scheduling, strictly distinguishing between organizational shifts and users' personal commitments.
+* **Visual Dashboards & Scheduling:** User-friendly frontend built with MUI, allowing users to apply for events via dynamic questionnaires and organizers to manage applications visually (Kanban/List styles) and via Calendar views.
+* **Comprehensive Audit Logging:** Every critical action is tracked and logged securely on the backend for accountability.
 
 ## 🚀 Getting Started
 
@@ -44,14 +45,15 @@ This is a Full-Stack Volunteer Management Application designed to connect volunt
    ```bash
    git clone [https://github.com/tamasnagy23/VolunteerManagementApplication.git](https://github.com/tamasnagy23/VolunteerManagementApplication.git)
    ```
-2. Create a PostgreSQL database for the application.
-3. Update the  `application.properties` file with your database and JWT credentials:
+2. Create the necessary PostgreSQL databases for the application (e.g., master_db and tenant-specific databases if running locally).
+3. Update the `application.properties` file with your database and JWT credentials:
     
     ```bash
-    spring.datasource.url=jdbc:postgresql://localhost:5432/your_db_name
+    spring.datasource.url=jdbc:postgresql://localhost:5432/master_db
     spring.datasource.username=your_username
     spring.datasource.password=your_password
     spring.jpa.hibernate.ddl-auto=update
+    # Add your JWT secret and expiration settings here
     ```
 4. Run the API (from the backend directory):
     
@@ -77,11 +79,11 @@ The API will be accessible at `http://localhost:8080.`
 📡 Core API Modules
 The backend serves several secure endpoints (requiring Bearer JWT tokens). Key modules include:
   
-  * Authentication: Login and JWT generation.
+  * Authentication & Tenant Routing: Login, JWT generation, and dynamic database routing based on user context.
   
-  * Applications: CRUD operations for volunteer applications, bulk status updates, and admin notes.
+  * Social Feed (Announcements): Posting, media handling, and recursive comment tree management.
   
-  * Events & Work Areas: Managing festival/event data and specific shifts.
+  * Events & Shifts: Managing hierarchical event data, work areas, capacity planning, and shift conflict validation.
   
   * Email Service: Integrated mailing for notifications and bulk announcements.
   
@@ -89,6 +91,8 @@ The backend serves several secure endpoints (requiring Bearer JWT tokens). Key m
 
   * Full test coverage using JUnit/Mockito (Backend) and Jest/React Testing Library (Frontend).
   
-  * Dockerizing the application (Docker Compose for easy DB, Backend, and Frontend setup).
+  * Dockerizing the application (Docker Compose for easy DB, Backend, and Frontend setup out of the box).
   
   * Enhancing the calendar view with drag-and-drop shift assignments.
+
+  * Implementing WebSockets for real-time Social Feed updates and notifications.
