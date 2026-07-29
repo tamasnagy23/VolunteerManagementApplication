@@ -46,6 +46,10 @@ export default function Layout() {
     const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
     const [user, setUser] = useState<UserProfile | null>(null);
 
+    const navContainerRef = useRef<HTMLDivElement>(null);
+    const navTouchStartX = useRef<number | null>(null);
+    const [pillDragOffset, setPillDragOffset] = useState<number | null>(null);
+
     // --- Dinamikus felhasználó figyelő ---
     useEffect(() => {
         const updateUserData = () => {
@@ -94,6 +98,18 @@ export default function Layout() {
     }, [canSeeAuditLog]);
 
     const currentTabIndex = navItems.findIndex(item => item.path === location.pathname);
+    // --- IDE KERÜLJÖN AZ ÚJ LOGIKA ---
+    const [slideDirection, setSlideDirection] = useState(1);
+    const prevTabIndex = useRef(currentTabIndex); // Itt már ismeri a currentTabIndex-et!
+
+    useEffect(() => {
+        if (currentTabIndex !== -1 && prevTabIndex.current !== -1) {
+            if (currentTabIndex > prevTabIndex.current) setSlideDirection(1);
+            else if (currentTabIndex < prevTabIndex.current) setSlideDirection(-1);
+        }
+        prevTabIndex.current = currentTabIndex;
+    }, [currentTabIndex]);
+    // ---------------------------------
 
     const rootPaths = ['/dashboard', '/my-shifts', '/statistics', '/logs'];
     const isRootPage = rootPaths.includes(location.pathname);
@@ -163,6 +179,61 @@ export default function Layout() {
         setSwipeState('in');
         setDragX(0);
         setTimeout(() => setSwipeState('idle'), 300);
+    };
+
+    // --- ÚJ: KAPSZULA VALÓS IDEJŰ HÚZÁSA ---
+    const handleNavTouchStart = (e: React.TouchEvent) => {
+        e.stopPropagation();
+        navTouchStartX.current = e.targetTouches[0].clientX;
+    };
+
+    const handleNavTouchMove = (e: React.TouchEvent) => {
+        if (navTouchStartX.current === null || !navContainerRef.current) return;
+
+        const diffX = e.targetTouches[0].clientX - navTouchStartX.current;
+
+        // Csak akkor lépünk "húzás" módba, ha legalább 5 pixelt elmozdult az ujj
+        // (Így a sima rákattintás a gombokra továbbra is hibátlanul működik)
+        if (pillDragOffset === null && Math.abs(diffX) < 5) return;
+
+        // Kiszámoljuk a menüsáv és egy gomb pontos pixelszélességét
+        const rect = navContainerRef.current.getBoundingClientRect();
+        const tabWidth = rect.width / navItems.length;
+
+        // A kapszula eredeti pozíciója (ahonnan a húzást kezdtük)
+        const currentBaseX = currentTabIndex * tabWidth;
+
+        let newX = currentBaseX + diffX;
+
+        // Megakadályozzuk, hogy a kapszulát kihúzzuk a képernyőről (Clamp)
+        const maxX = rect.width - tabWidth;
+        newX = Math.max(0, Math.min(newX, maxX));
+
+        // Beállítjuk a kapszula új, valós idejű pozícióját
+        setPillDragOffset(newX);
+    };
+
+    const handleNavTouchEnd = () => {
+        if (pillDragOffset !== null && navContainerRef.current) {
+            const rect = navContainerRef.current.getBoundingClientRect();
+            const tabWidth = rect.width / navItems.length;
+
+            // Megnézzük, hol engedte el a felhasználó a kapszulát (a közepe alapján)
+            const pillCenter = pillDragOffset + (tabWidth / 2);
+            let targetIndex = Math.floor(pillCenter / tabWidth);
+
+            // Biztonsági határok beállítása
+            targetIndex = Math.max(0, Math.min(targetIndex, navItems.length - 1));
+
+            // Ha másik fülre húzta, navigálunk
+            if (targetIndex !== currentTabIndex) {
+                navigate(navItems[targetIndex].path);
+            }
+        }
+
+        // Húzás befejezése, változók törlése
+        navTouchStartX.current = null;
+        setPillDragOffset(null);
     };
 
     const getAvatarUrl = () => {
@@ -302,41 +373,70 @@ export default function Layout() {
 
             <Box
                 component="main"
-                onTouchStart={isMobile ? onTouchStart : undefined}
-                onTouchMove={isMobile ? onTouchMove : undefined}
-                onTouchEnd={isMobile ? onTouchEnd : undefined}
+                onTouchStart={(isMobile && isRootPage) ? onTouchStart : undefined}
+                onTouchMove={(isMobile && isRootPage) ? onTouchMove : undefined}
+                onTouchEnd={(isMobile && isRootPage) ? onTouchEnd : undefined}
                 sx={{
                     flexGrow: 1,
                     pt: '64px',
                     pb: isMobile ? '100px' : '40px',
                     bgcolor: 'transparent',
-                    transform: isMobile ? `translateX(${dragX}px)` : 'none',
-                    transition: isMobile ? getTransitionStyle() : 'none',
-                    animation: isMobile ? 'none' : 'fadeIn 0.3s ease-out forwards',
-                    '@keyframes fadeIn': { '0%': { opacity: 0 }, '100%': { opacity: 1 } }
+                    transform: (isMobile && isRootPage) ? `translateX(${dragX}px)` : 'none',
+                    transition: (isMobile && isRootPage) ? getTransitionStyle() : 'none',
                 }}
             >
-                <Outlet />
+                {/* --- ÚJ: FINOM OLDALVÁLTÁS ANIMÁCIÓ --- */}
+                <Box
+                    key={location.pathname}
+                    sx={{
+                        // Gyorsabb, "snappy" animáció
+                        animation: 'dynamicSlideIn 0.25s cubic-bezier(0.2, 0.8, 0.2, 1) forwards',
+                        willChange: 'opacity, transform',
+                        '@keyframes dynamicSlideIn': {
+                            '0%': {
+                                opacity: 0,
+                                // A varázslat: az iránytól függően pozitív (jobb) vagy negatív (bal) pixelről indul!
+                                transform: `translateX(${slideDirection * 30}px)`
+                            },
+                            '100%': {
+                                opacity: 1,
+                                transform: 'translateX(0)'
+                            }
+                        },
+                        height: '100%'
+                    }}
+                >
+                    <Outlet />
+                </Box>
             </Box>
 
             {isMobile && (
                 <Slide direction="up" in={true} timeout={400}>
                     <Paper
+                        onTouchStart={handleNavTouchStart}
+                        onTouchMove={handleNavTouchMove}
+                        onTouchEnd={handleNavTouchEnd}
                         sx={{
-                            position: 'fixed', bottom: 0, left: 0, right: 0, zIndex: 1200,
-                            borderRadius: '24px 24px 0 0',
-                            background: isDarkMode
-                                ? 'rgba(10, 15, 30, 0.85)'
-                                : 'rgba(255, 255, 255, 0.9)',
+                            position: 'fixed',
+                            bottom: 'calc(16px + env(safe-area-inset-bottom))',
+                            left: 16,
+                            right: 16,
+                            zIndex: 1200,
+                            borderRadius: '24px',
+                            background: isDarkMode ? 'rgba(15, 23, 42, 0.85)' : 'rgba(255, 255, 255, 0.9)',
                             backdropFilter: 'blur(20px)',
-                            borderTop: '1px solid',
-                            borderColor: isDarkMode ? 'rgba(255, 255, 255, 0.05)' : 'rgba(255,255,255,0.6)',
+                            border: '1px solid',
+                            borderColor: isDarkMode ? 'rgba(255, 255, 255, 0.1)' : 'rgba(255,255,255,0.6)',
+                            boxShadow: isDarkMode ? '0 10px 40px rgba(0, 0, 0, 0.6)' : '0 10px 40px rgba(0, 0, 0, 0.1)',
                             display: 'flex', alignItems: 'center', justifyContent: 'center',
-                            height: '75px', pb: 'env(safe-area-inset-bottom)',
+                            height: '70px',
                         }}
                         elevation={0}
                     >
-                        <Box sx={{ position: 'relative', display: 'flex', width: '100%', px: 1, height: '60px', alignItems: 'center' }}>
+                        {/* IDE KERÜLT A REF: Ez a doboz méri le a szélességet */}
+                        <Box ref={navContainerRef} sx={{ position: 'relative', display: 'flex', width: '100%', px: 1, height: '60px', alignItems: 'center' }}>
+
+                            {/* EZ MAGA A HÁTTÉRBEN MOZGÓ KAPSZULA */}
                             <Box sx={{
                                 position: 'absolute',
                                 left: 8, right: 8,
@@ -347,8 +447,17 @@ export default function Layout() {
                                 <Box sx={{
                                     width: `${100 / navItems.length}%`,
                                     height: '100%',
-                                    transform: `translateX(${currentTabIndex * 100}%)`,
-                                    transition: 'transform 0.4s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.3s ease',
+                                    // --- VARÁZSLAT ITT ---
+                                    // Ha húzzuk (nem null), akkor pixelben követ, különben százalékosan a fülön marad
+                                    transform: pillDragOffset !== null
+                                        ? `translateX(${pillDragOffset}px)`
+                                        : `translateX(${currentTabIndex * 100}%)`,
+
+                                    // Ha húzzuk, kikapcsoljuk az animációt (instant), elengedéskor visszakapcsoljuk (smooth)
+                                    transition: pillDragOffset !== null
+                                        ? 'none'
+                                        : 'transform 0.4s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.3s ease',
+
                                     opacity: currentTabIndex === -1 ? 0 : 1,
                                     p: '4px'
                                 }}>
@@ -362,6 +471,7 @@ export default function Layout() {
                                 </Box>
                             </Box>
 
+                            {/* GOMBOK (Ezek maradnak egy helyben a kapszula felett) */}
                             {navItems.map((item, index) => {
                                 const isActive = currentTabIndex === index;
                                 return (
@@ -374,7 +484,7 @@ export default function Layout() {
                                             color: isActive
                                                 ? (isDarkMode ? '#818cf8' : 'primary.main')
                                                 : (isDarkMode ? 'rgba(255,255,255,0.4)' : 'text.secondary'),
-                                            transition: 'all 0.3s ease'
+                                            transition: 'color 0.3s ease'
                                         }}
                                     >
                                         {item.icon}

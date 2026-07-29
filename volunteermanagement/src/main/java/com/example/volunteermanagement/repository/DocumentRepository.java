@@ -9,11 +9,9 @@ import java.util.List;
 @Repository
 public interface DocumentRepository extends JpaRepository<Document, Long> {
 
-    List<Document> findByTenantId(String tenantId);
-
-    // Lekéri egy adott esemény összes dokumentumát (pl. a szervezőnek)
+    // Eseményhez tartozó összes dokumentum lekérése
     List<Document> findByEventId(Long eventId);
 
-    // Lekéri egy adott önkéntes feltöltéseit egy adott eseményhez
-    List<Document> findByEventIdAndUserId(Long eventId, Long userId);
+    // Egy adott felhasználó dokumentumai (pl. a saját aláírt szerződése)
+    List<Document> findByUserIdAndDocumentType(Long userId, String documentType);
 }

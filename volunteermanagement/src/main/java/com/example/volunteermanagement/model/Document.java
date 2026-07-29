@@ -1,33 +1,39 @@
 package com.example.volunteermanagement.model;
 
 import jakarta.persistence.*;
-import lombok.*;
+import lombok.Data;
 import java.time.LocalDateTime;
 
+@Data
 @Entity
 @Table(name = "documents")
-@Getter
-@Setter
-@NoArgsConstructor
-@AllArgsConstructor
-@Builder
 public class Document {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    private String originalFileName;
+    @Column(name = "stored_file_name", nullable = false)
     private String storedFileName;
-    private String filePath;
+
+    @Column(nullable = false)
+    private String originalFileName;
+
     private String contentType;
+
     private Long fileSize;
 
-    private String documentType; // pl. "TEMPLATE", "SIGNED_CONTRACT"
+    @Column(nullable = false)
+    private String documentType;
 
-    private String tenantId;
-    private Long eventId;        // <--- BEKERÜLT AZ ESEMÉNY ID
-    private Long userId;         // Nullable, pl. a sablonoknál nincs userId, csak a visszatöltött fájloknál
+    // Nincs fizikai SQL kapcsolat a master_db-vel, csak az ID-t tároljuk
+    @Column(name = "user_id")
+    private Long userId;
 
-    private LocalDateTime uploadedAt;
+    @Column(name = "event_id")
+    private Long eventId;
+
+    private String filePath;
+
+    private LocalDateTime uploadedAt = LocalDateTime.now();
 }

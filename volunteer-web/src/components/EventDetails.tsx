@@ -33,6 +33,7 @@ import { useThemeToggle } from '../theme/ThemeContextProvider';
 
 // --- ÚJ IMPORT: Dokumentumkezelő ---
 import EventDocumentsAdmin from '../components/EventDocumentsAdmin';
+import EventDocumentsVolunteer from '../components/EventDocumentsVolunteer';
 
 // --- INTERFÉSZEK ---
 interface EventQuestion {
@@ -533,15 +534,18 @@ export default function EventDetails() {
 
                             {/* BAL OSZLOP: Információk, Kapcsolatok és Dokumentumok (TABS) */}
                             <Grid size={{ xs: 12, md: 7, lg: 8 }}>
-                                <Box sx={{ borderBottom: 1, borderColor: isDarkMode ? 'rgba(255,255,255,0.1)' : 'divider', mb: 3 }}>
-                                    <Tabs value={tabIndex} onChange={(_, v) => setTabIndex(v)} textColor="primary" indicatorColor="primary">
+                                <Box
+                                    sx={{ borderBottom: 1, borderColor: isDarkMode ? 'rgba(255,255,255,0.1)' : 'divider', mb: 3 }}
+                                    // --- IDE KERÜL A KÉT ÚJ SOR ---
+                                    onTouchStart={(e) => e.stopPropagation()}
+                                    onMouseDownCapture={(e) => e.stopPropagation()}
+                                >
+                                    <Tabs value={tabIndex} onChange={(_, v) => setTabIndex(v)} textColor="primary" indicatorColor="primary" variant="scrollable" scrollButtons="auto" allowScrollButtonsMobile >
                                         <Tab label="Információk" sx={{ fontWeight: 'bold', fontSize: '1.05rem' }} />
                                         <Tab label="Elérhetőségek" sx={{ fontWeight: 'bold', fontSize: '1.05rem' }} />
 
-                                        {/* --- ÚJ: Dokumentumok fül, ha szervező / admin --- */}
-                                        {(permissions?.globalAdmin || permissions?.eventRole === 'ORGANIZER') && (
-                                            <Tab label="Dokumentumok" sx={{ fontWeight: 'bold', fontSize: '1.05rem' }} />
-                                        )}
+                                        {/* --- FRISSÍTVE: Most már mindenki látja ezt a fület! --- */}
+                                        <Tab label="Dokumentumok" sx={{ fontWeight: 'bold', fontSize: '1.05rem' }} />
                                     </Tabs>
                                 </Box>
 
@@ -649,13 +653,22 @@ export default function EventDetails() {
                                     </Box>
                                 )}
 
-                                {/* --- 3. FÜL: DOKUMENTUMOK (CSAK SZERVEZŐKNEK/ADMINOKNAK) --- */}
-                                {tabIndex === 2 && (permissions?.globalAdmin || permissions?.eventRole === 'ORGANIZER') && (
+                                {/* --- 3. FÜL: DOKUMENTUMOK (ELÁGAZÁS SZERVEZŐK ÉS ÖNKÉNTESEK KÖZÖTT) --- */}
+                                {tabIndex === 2 && (
                                     <Box>
-                                        <EventDocumentsAdmin
-                                            eventId={Number(id)}
-                                            tenantId={localStorage.getItem('activeOrgId') || 'default'}
-                                        />
+                                        {(permissions?.globalAdmin || permissions?.eventRole === 'ORGANIZER') ? (
+                                            // SZERVEZŐI NÉZET
+                                            <EventDocumentsAdmin
+                                                eventId={Number(id)}
+                                                tenantId={localStorage.getItem('activeOrgId') || 'default'}
+                                            />
+                                        ) : (
+                                            // ÖNKÉNTES NÉZET
+                                            <EventDocumentsVolunteer
+                                                eventId={Number(id)}
+                                                tenantId={localStorage.getItem('activeOrgId') || 'default'}
+                                            />
+                                        )}
                                     </Box>
                                 )}
 

@@ -1,5 +1,6 @@
 package com.example.volunteermanagement.controller;
 
+import com.example.volunteermanagement.dto.DocumentDTO;
 import com.example.volunteermanagement.model.Document;
 import com.example.volunteermanagement.service.DocumentService;
 import lombok.RequiredArgsConstructor;
@@ -19,56 +20,46 @@ public class DocumentController {
 
     private final DocumentService documentService;
 
-    // 1. Dokumentum feltöltése
     @PostMapping("/upload")
     public ResponseEntity<Document> uploadDocument(
             @RequestParam("file") MultipartFile file,
             @RequestParam("documentType") String documentType,
+            @RequestParam("eventId") Long eventId,
             @RequestParam("tenantId") String tenantId,
-            @RequestParam("eventId") Long eventId, // <--- ÚJ PARAMÉTER
+            // A required = false miatt a szervező küldhet null-t, az önkéntes meg elküldi a saját ID-ját
             @RequestParam(value = "userId", required = false) Long userId) {
 
-        Document savedDocument = documentService.uploadDocument(file, documentType, tenantId, eventId, userId);
-        return ResponseEntity.ok(savedDocument);
+        Document savedDoc = documentService.uploadDocument(file, documentType, eventId, tenantId, userId);
+        return ResponseEntity.ok(savedDoc);
     }
 
-    // 2. Egy adott ESEMÉNY összes dokumentumának lekérése (Szervezői nézet)
     @GetMapping("/event/{eventId}")
-    public ResponseEntity<List<Document>> getDocumentsByEvent(@PathVariable Long eventId) {
-        List<Document> documents = documentService.getDocumentsByEvent(eventId);
-        return ResponseEntity.ok(documents);
+    public ResponseEntity<List<DocumentDTO>> getDocumentsByEvent(@PathVariable Long eventId) {
+        return ResponseEntity.ok(documentService.getDocumentsByEvent(eventId));
     }
 
-    // 3. Egy adott önkéntes dokumentumai az eseményen (Önkéntes profil)
+    // ÚJ VÉGPONT: Önkéntes lekérheti a saját feltöltött dokumentumait
     @GetMapping("/event/{eventId}/user/{userId}")
-    public ResponseEntity<List<Document>> getVolunteerDocuments(
+    public ResponseEntity<List<DocumentDTO>> getDocumentsByUserAndEvent(
             @PathVariable Long eventId,
             @PathVariable Long userId) {
-        List<Document> documents = documentService.getVolunteerDocumentsForEvent(eventId, userId);
-        return ResponseEntity.ok(documents);
+        return ResponseEntity.ok(documentService.getDocumentsByUserAndEvent(userId, eventId));
     }
 
-    // 4. Dokumentum letöltése ID alapján
-    @GetMapping("/download/{documentId}")
-    public ResponseEntity<Resource> downloadDocument(@PathVariable Long documentId) {
-        Document documentInfo = documentService.getDocumentInfo(documentId);
-        Resource resource = documentService.downloadDocument(documentId);
+    @GetMapping("/download/{id}")
+    public ResponseEntity<Resource> downloadDocument(@PathVariable Long id) {
+        Resource resource = documentService.downloadDocument(id);
 
-        String contentType = documentInfo.getContentType();
-        if (contentType == null || contentType.isEmpty()) {
-            contentType = "application/octet-stream";
-        }
-
+        // Beállítjuk a headereket, hogy a böngésző letöltésként kezelje a fájlt
         return ResponseEntity.ok()
-                .contentType(MediaType.parseMediaType(contentType))
-                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + documentInfo.getOriginalFileName() + "\"")
+                .contentType(MediaType.APPLICATION_OCTET_STREAM)
+                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + resource.getFilename() + "\"")
                 .body(resource);
     }
 
-    // 5. Dokumentum törlése
-    @DeleteMapping("/{documentId}")
-    public ResponseEntity<Void> deleteDocument(@PathVariable Long documentId) {
-        documentService.deleteDocument(documentId);
-        return ResponseEntity.noContent().build();
+    @DeleteMapping("/{id}")
+    public ResponseEntity<Void> deleteDocument(@PathVariable Long id) {
+        documentService.deleteDocument(id);
+        return ResponseEntity.ok().build();
     }
 }

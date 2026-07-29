@@ -169,7 +169,10 @@ export default function Dashboard() {
             {/* ========================================================================= */}
             {/* MOBIL NÉZET: Vízszintes "Sztori" sáv a csapatoknak */}
             {/* ========================================================================= */}
-            <Box sx={{ display: { xs: 'flex', md: 'none' }, overflowX: 'auto', pb: 2, mb: 2, gap: 2, '&::-webkit-scrollbar': { display: 'none' } }}>
+            <Box sx={{ display: { xs: 'flex', md: 'none' }, overflowX: 'auto', pb: 2, mb: 2, gap: 2, '&::-webkit-scrollbar': { display: 'none' } }}
+                 onTouchStart={(e) => e.stopPropagation()}
+                 onMouseDownCapture={(e) => e.stopPropagation()}
+            >
                 <Box onClick={() => setIsDiscoverOpen(true)} sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1, minWidth: 72, cursor: 'pointer' }}>
                     <Avatar sx={{ width: 64, height: 64, border: '2px dashed', borderColor: 'primary.main', bgcolor: 'transparent', color: 'primary.main' }}>
                         <AddIcon fontSize="large" />
