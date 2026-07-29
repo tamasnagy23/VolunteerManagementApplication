@@ -6,6 +6,7 @@ import {Box, Button, CssBaseline, Typography} from '@mui/material';
 // Ezekre azonnal szükség van az alkalmazás indulásakor, így maradnak normál importok.
 import ThemeContextProvider from './theme/ThemeContextProvider';
 import LoadingScreen from './components/LoadingScreen';
+import Settings from './components/Settings';
 
 // --- LUSTA BETÖLTÉS (LAZY LOADING) ---
 // Ezek a fájlok csak akkor töltődnek le a felhasználó gépére, amikor rájuk kattint!
@@ -93,6 +94,7 @@ function App() {
                             <Route path="/events/:id/team" element={<EventTeamManager />} />
                             <Route path="/statistics" element={<Statistics />} />
                             <Route path="/organization/:id" element={<OrganizationDetails />} />
+                            <Route path="/settings" element={<Settings />} />
                         </Route>
 
                         <Route path="*" element={

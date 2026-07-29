@@ -17,41 +17,84 @@ public class FileStorageService {
     // Ide mentjük a képeket a projekted gyökérmappájába
     private final String uploadDir = "uploads";
 
-    // A konstruktort ki is törölhetjük, mert a mentésnél dinamikusan kezeljük a mappákat!
-
+    // --- 1. A TE EREDETI METÓDUSOD (Érintetlenül hagyva az eddigi funkciókhoz) ---
     public String storeFile(MultipartFile file, String subFolder) {
         try {
             if (file == null || file.isEmpty()) {
                 throw new RuntimeException("Üres fájlt nem lehet feltölteni.");
             }
 
-            // 1. Cél mappa elérési útjának összeállítása (pl. uploads/announcements)
             Path targetDirectory = Paths.get(uploadDir, subFolder);
 
-            // 2. DINAMIKUS MAPPA LÉTREHOZÁS: Ha nem létezik a mappa, most létrehozzuk!
             if (!Files.exists(targetDirectory)) {
                 Files.createDirectories(targetDirectory);
             }
 
-            // 3. Eredeti fájlnév és kiterjesztés kinyerése (pl. .png, .jpg)
             String originalFilename = StringUtils.cleanPath(file.getOriginalFilename() != null ? file.getOriginalFilename() : "");
             String extension = originalFilename.contains(".") ? originalFilename.substring(originalFilename.lastIndexOf(".")) : "";
-
-            // 4. Generálunk egy egyedi nevet, pl: 550e8400-e29b-41d4-a716-446655440000.png
             String newFilename = UUID.randomUUID().toString() + extension;
 
-            // 5. Cél útvonal összeállítása a fájlnak
             Path targetLocation = targetDirectory.resolve(newFilename);
-
-            // 6. Fájl másolása a mappába
             Files.copy(file.getInputStream(), targetLocation, StandardCopyOption.REPLACE_EXISTING);
 
-            // Visszaadjuk a relatív URL-t a React számára
             return "/uploads/" + subFolder + "/" + newFilename;
 
         } catch (IOException ex) {
-            // Részletesebb hibaüzenet, hogy legközelebb pontosan lássuk, hol akadt el
             throw new RuntimeException("Hiba a fájl mentésekor a '" + subFolder + "' mappába: " + ex.getMessage(), ex);
+        }
+    }
+
+    // --- 2. AZ ÚJ METÓDUS (A DocumentService számára, ami 3 paramétert vár) ---
+    public String storeFile(MultipartFile file, String storedFileName, String subFolder) {
+        try {
+            if (file == null || file.isEmpty()) {
+                throw new RuntimeException("Üres fájlt nem lehet feltölteni.");
+            }
+
+            Path targetDirectory = Paths.get(uploadDir, subFolder);
+
+            if (!Files.exists(targetDirectory)) {
+                Files.createDirectories(targetDirectory);
+            }
+
+            // Itt a paraméterben kapott storedFileName-t használjuk a UUID generálás helyett
+            Path targetLocation = targetDirectory.resolve(storedFileName);
+            Files.copy(file.getInputStream(), targetLocation, StandardCopyOption.REPLACE_EXISTING);
+
+            return "/uploads/" + subFolder + "/" + storedFileName;
+
+        } catch (IOException ex) {
+            throw new RuntimeException("Hiba a fájl mentésekor a '" + subFolder + "' mappába: " + ex.getMessage(), ex);
+        }
+    }
+
+    // --- 3. FÁJL BETÖLTÉSE (A te eredeti kódod, érintetlenül) ---
+    public org.springframework.core.io.Resource loadFileAsResource(String relativePath) {
+        try {
+            String cleanPath = relativePath.startsWith("/") ? relativePath.substring(1) : relativePath;
+            Path filePath = Paths.get(cleanPath).normalize();
+
+            org.springframework.core.io.Resource resource = new org.springframework.core.io.UrlResource(filePath.toUri());
+            if (resource.exists() && resource.isReadable()) {
+                return resource;
+            } else {
+                throw new RuntimeException("A fájl nem található vagy nem olvasható: " + relativePath);
+            }
+        } catch (Exception ex) {
+            throw new RuntimeException("Hiba a fájl betöltésekor: " + relativePath, ex);
+        }
+    }
+
+    // --- 4. FÁJL TÖRLÉSE (A te eredeti kódod, érintetlenül) ---
+    public void deleteFile(String relativePath) {
+        try {
+            if (relativePath == null || relativePath.isEmpty()) return;
+
+            String cleanPath = relativePath.startsWith("/") ? relativePath.substring(1) : relativePath;
+            Path filePath = Paths.get(cleanPath).normalize();
+            Files.deleteIfExists(filePath);
+        } catch (IOException ex) {
+            throw new RuntimeException("Nem sikerült törölni a fájlt: " + relativePath, ex);
         }
     }
 }

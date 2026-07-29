@@ -14,7 +14,6 @@ import LogoutIcon from '@mui/icons-material/Logout';
 import SettingsIcon from '@mui/icons-material/Settings';
 import BarChartIcon from '@mui/icons-material/BarChart';
 import AssignmentIcon from '@mui/icons-material/Assignment';
-import Brightness4Icon from '@mui/icons-material/Brightness4';
 import ArrowBackIosNewIcon from '@mui/icons-material/ArrowBackIosNew';
 
 import { useThemeToggle } from '../theme/ThemeContextProvider';
@@ -41,12 +40,13 @@ export default function Layout() {
     const theme = useTheme();
     const isMobile = useMediaQuery(theme.breakpoints.down('md'));
 
-    const { isDarkMode, toggleTheme } = useThemeToggle();
+    // Itt már csak az isDarkMode kell a stílusok miatt, a toggleTheme kikerült
+    const { isDarkMode } = useThemeToggle();
 
     const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
     const [user, setUser] = useState<UserProfile | null>(null);
 
-    // --- JAVÍTÁS: Dinamikus felhasználó figyelő ---
+    // --- Dinamikus felhasználó figyelő ---
     useEffect(() => {
         const updateUserData = () => {
             const userData = localStorage.getItem('user');
@@ -248,18 +248,6 @@ export default function Layout() {
 
                         {/* --- JOBB OLDAL: Ikonok és Asztali Menü --- */}
                         <Box sx={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: { xs: 0.5, sm: 1 }, ml: 'auto', zIndex: 10 }}>
-                            <IconButton
-                                onClick={toggleTheme}
-                                color="inherit"
-                                size={isMobile ? "small" : "medium"}
-                                sx={{
-                                    transition: 'transform 0.4s ease',
-                                    '&:hover': { transform: 'rotate(180deg)' }
-                                }}
-                            >
-                                <Brightness4Icon fontSize={isMobile ? "small" : "medium"} />
-                            </IconButton>
-
                             {!isMobile && (
                                 <Box sx={{ display: 'flex', alignItems: 'center', mr: 2 }}>
                                     <Tabs
@@ -431,7 +419,13 @@ export default function Layout() {
                 </MenuItem>
 
                 <MenuItem onClick={() => { handleMenuClose(); navigate('/profile'); }} sx={{ py: 1.5 }}>
-                    <SettingsIcon sx={{ mr: 1.5, fontSize: 20, color: 'text.secondary' }} /> Profil szerkesztése
+                    {/* Profil ikon (lecseréltük, hogy ne fogaskerék legyen) */}
+                    <AccountCircle sx={{ mr: 1.5, fontSize: 20, color: 'text.secondary' }} /> Profil szerkesztése
+                </MenuItem>
+
+                {/* --- ÚJ GOMB: BEÁLLÍTÁSOK --- */}
+                <MenuItem onClick={() => { handleMenuClose(); navigate('/settings'); }} sx={{ py: 1.5 }}>
+                    <SettingsIcon sx={{ mr: 1.5, fontSize: 20, color: 'text.secondary' }} /> Beállítások
                 </MenuItem>
 
                 <MenuItem onClick={handleLogout} sx={{ py: 1.5, color: 'error.main' }}>

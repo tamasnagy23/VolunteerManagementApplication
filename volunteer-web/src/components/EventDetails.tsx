@@ -31,6 +31,9 @@ import axios from 'axios';
 import LoadingScreen from "./LoadingScreen.tsx";
 import { useThemeToggle } from '../theme/ThemeContextProvider';
 
+// --- ÚJ IMPORT: Dokumentumkezelő ---
+import EventDocumentsAdmin from '../components/EventDocumentsAdmin';
+
 // --- INTERFÉSZEK ---
 interface EventQuestion {
     id: number;
@@ -374,7 +377,6 @@ export default function EventDetails() {
         const hasActiveApp = myApplications.some(app => app.status !== 'WITHDRAWN' && app.status !== 'REJECTED');
         const canApply = membershipStatus === 'APPROVED' || permissions?.globalAdmin;
 
-        // JAVÍTÁS: 1. Először ellenőrizzük, hogy szervező/koordinátor-e az illető!
         if (isOrganizerOrAdmin || isCoordinator) {
             const btnLabel = isOrganizerOrAdmin ? 'Csapat Menedzselése' : 'Beosztások Kezelése';
             const btnPath = isOrganizerOrAdmin ? `/events/${id}/team` : `/events/${id}/shifts`;
@@ -403,12 +405,10 @@ export default function EventDetails() {
             );
         }
 
-        // JAVÍTÁS: 2. Csak a fenti szervezői ellenőrzés után nézzük meg, hogy le van-e zárva (ez már csak az önkéntesekre hat)
         if (isClosed) {
             return <Button variant="contained" color="error" size="large" startIcon={<EventBusyIcon />} disabled sx={{ py: 1.8, fontWeight: '900', borderRadius: 3, width: '100%' }}>Lezárva</Button>;
         }
 
-        // 3. Ha nincs lezárva, és sima önkéntes
         if (canApply) {
             if (hasActiveApp) {
                 return (
@@ -439,7 +439,6 @@ export default function EventDetails() {
             }
         }
 
-        // 4. Ha még nem tagja a szervezetnek
         return (
             <Box sx={{ width: '100%' }}>
                 {membershipStatus === 'PENDING' ? (
@@ -532,12 +531,17 @@ export default function EventDetails() {
                         {/* --- KÉT OSZLOPOS ELRENDEZÉS --- */}
                         <Grid container spacing={4} mt={3}>
 
-                            {/* BAL OSZLOP: Információk és Kapcsolatok (TABS) */}
+                            {/* BAL OSZLOP: Információk, Kapcsolatok és Dokumentumok (TABS) */}
                             <Grid size={{ xs: 12, md: 7, lg: 8 }}>
                                 <Box sx={{ borderBottom: 1, borderColor: isDarkMode ? 'rgba(255,255,255,0.1)' : 'divider', mb: 3 }}>
                                     <Tabs value={tabIndex} onChange={(_, v) => setTabIndex(v)} textColor="primary" indicatorColor="primary">
                                         <Tab label="Információk" sx={{ fontWeight: 'bold', fontSize: '1.05rem' }} />
                                         <Tab label="Elérhetőségek" sx={{ fontWeight: 'bold', fontSize: '1.05rem' }} />
+
+                                        {/* --- ÚJ: Dokumentumok fül, ha szervező / admin --- */}
+                                        {(permissions?.globalAdmin || permissions?.eventRole === 'ORGANIZER') && (
+                                            <Tab label="Dokumentumok" sx={{ fontWeight: 'bold', fontSize: '1.05rem' }} />
+                                        )}
                                     </Tabs>
                                 </Box>
 
@@ -571,7 +575,7 @@ export default function EventDetails() {
                                     </Box>
                                 )}
 
-                                {/* 2. FÜL: ELÉRHETŐSÉGEK (FRISSÍTETT GOMBOK) */}
+                                {/* 2. FÜL: ELÉRHETŐSÉGEK */}
                                 {tabIndex === 1 && (
                                     <Box>
                                         <Typography variant="h5" fontWeight="900" sx={{ mb: 3, color: 'text.primary' }}>Szervezők és Koordinátorok</Typography>
@@ -644,6 +648,17 @@ export default function EventDetails() {
                                         )}
                                     </Box>
                                 )}
+
+                                {/* --- 3. FÜL: DOKUMENTUMOK (CSAK SZERVEZŐKNEK/ADMINOKNAK) --- */}
+                                {tabIndex === 2 && (permissions?.globalAdmin || permissions?.eventRole === 'ORGANIZER') && (
+                                    <Box>
+                                        <EventDocumentsAdmin
+                                            eventId={Number(id)}
+                                            tenantId={localStorage.getItem('activeOrgId') || 'default'}
+                                        />
+                                    </Box>
+                                )}
+
                             </Grid>
 
                             {/* JOBB OSZLOP: Oldalsáv */}
