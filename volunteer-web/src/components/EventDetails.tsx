@@ -34,6 +34,7 @@ import { useThemeToggle } from '../theme/ThemeContextProvider';
 // --- ÚJ IMPORT: Dokumentumkezelő ---
 import EventDocumentsAdmin from '../components/EventDocumentsAdmin';
 import EventDocumentsVolunteer from '../components/EventDocumentsVolunteer';
+import VolunteerQrCode from '../components/VolunteerQrCode'; // vagy ahol létrehoztad
 
 // --- INTERFÉSZEK ---
 interface EventQuestion {
@@ -146,6 +147,8 @@ export default function EventDetails() {
     const [callDialogOpen, setCallDialogOpen] = useState(false);
     const [contactToCall, setContactToCall] = useState<EventContact | null>(null);
 
+    const [userId, setUserId] = useState<number | null>(null);
+
     useEffect(() => {
         if (id) {
             const fetchData = async () => {
@@ -164,6 +167,7 @@ export default function EventDetails() {
                     setContacts(contactsRes.data);
 
                     const activeOrgId = localStorage.getItem('activeOrgId');
+                    setUserId(userRes.data.id);
                     const membership = userRes.data.memberships?.find((m: Membership) => m.orgId === Number(activeOrgId));
                     if (membership) setMembershipStatus(membership.status);
                     if (userRes.data.role === 'SYS_ADMIN') setMembershipStatus('APPROVED');
@@ -677,6 +681,20 @@ export default function EventDetails() {
                             {/* JOBB OSZLOP: Oldalsáv */}
                             <Grid size={{ xs: 12, md: 5, lg: 4 }}>
                                 <Box sx={{ position: 'sticky', top: 100, display: 'flex', flexDirection: 'column', gap: 4 }}>
+
+                                    {/* --- ÚJ: ÉTELKUPON QR KÓD (Csak elfogadott jelentkezés esetén) --- */}
+                                    {userId && myApplications.some(app => app.status === 'APPROVED') && permissions?.eventRole !== 'ORGANIZER' && (
+                                        <Box>
+                                            <Typography variant="subtitle2" fontWeight="900" color="primary" sx={{ textTransform: 'uppercase', mb: 2, ml: 1, letterSpacing: 1 }}>
+                                                🎁 Juttatásaid
+                                            </Typography>
+                                            <VolunteerQrCode
+                                                volunteerId={userId}
+                                                eventId={event.id}
+                                                eventName={event.title}
+                                            />
+                                        </Box>
+                                    )}
 
                                     {/* 4. MY APPLICATIONS */}
                                     {myApplications.length > 0 && permissions?.eventRole !== 'COORDINATOR' && permissions?.eventRole !== 'ORGANIZER' && (

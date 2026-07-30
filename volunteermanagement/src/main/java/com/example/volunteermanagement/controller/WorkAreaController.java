@@ -44,7 +44,7 @@ public class WorkAreaController {
     public ResponseEntity<List<WorkAreaDTO>> getWorkAreasForEvent(@PathVariable Long eventId) {
         List<WorkArea> areas = workAreaRepository.findByEventId(eventId);
         List<WorkAreaDTO> dtos = areas.stream()
-                .map(area -> new WorkAreaDTO(area.getId(), area.getName(), area.getDescription(), area.getCapacity(), List.of()))
+                .map(area -> new WorkAreaDTO(area.getId(), area.getName(), area.getDescription(), area.getCapacity(), area.getMealsPerShift()!= null ? area.getMealsPerShift() : 0, List.of()))
                 .collect(Collectors.toList());
         return ResponseEntity.ok(dtos);
     }

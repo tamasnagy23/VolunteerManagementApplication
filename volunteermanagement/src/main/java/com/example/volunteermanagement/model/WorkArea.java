@@ -37,6 +37,11 @@ public class WorkArea {
     @Column(nullable = false)
     private Integer capacity;
 
+    // --- ÚJ MEZŐ: Étkezések száma egy műszakhoz ---
+    @Column(nullable = false, columnDefinition = "integer default 0")
+    @Builder.Default
+    private Integer mealsPerShift = 0;
+
     // --- ÚJ MEZŐ: Törlés időpontja ---
     @Column(name = "deleted_at")
     private LocalDateTime deletedAt;

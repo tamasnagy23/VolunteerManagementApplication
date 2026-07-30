@@ -1,5 +1,6 @@
 package com.example.volunteermanagement.dto;
 
+import com.example.volunteermanagement.model.QuestionPurpose;
 import com.example.volunteermanagement.model.QuestionType;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
@@ -12,6 +13,9 @@ public record EventQuestionDTO(
 
         @NotNull(message = "A kérdés típusa kötelező")
         QuestionType questionType,
+
+        // --- ÚJ MEZŐ BEKERÜLT ---
+        QuestionPurpose purpose,
 
         String options, // Ide jönnek a válaszlehetőségek vesszővel elválasztva
 

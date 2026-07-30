@@ -7,5 +7,6 @@ public record WorkAreaDTO(
         String name,
         String description,
         Integer capacity,
+        Integer mealsPerShift,
         List<ShiftDTO> shifts
 ) {}

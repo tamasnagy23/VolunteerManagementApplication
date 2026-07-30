@@ -37,10 +37,13 @@ interface WorkAreaInput {
     capacity: number;
 }
 
+export type QuestionPurpose = 'GENERAL' | 'TSHIRT_SIZE' | 'DIETARY_PREFERENCE' | 'MEDICAL_INFO';
+
 interface EventQuestionInput {
     id?: number;
     questionText: string;
     questionType: 'TEXT' | 'DROPDOWN' | 'CHECKBOX';
+    purpose: QuestionPurpose; // <-- ÚJ MEZŐ
     options: string;
     isRequired: boolean;
 }
@@ -182,7 +185,12 @@ export default function EventForm() {
 
                     if (data.questions) {
                         setQuestions(data.questions.map((q: EventQuestionInput) => ({
-                            id: q.id, questionText: q.questionText, questionType: q.questionType, options: q.options || '', isRequired: q.isRequired
+                            id: q.id,
+                            questionText: q.questionText,
+                            questionType: q.questionType,
+                            purpose: q.purpose || 'GENERAL', // <-- ÚJ MEZŐ BETÖLTÉSE
+                            options: q.options || '',
+                            isRequired: q.isRequired
                         })));
                     }
                 }
@@ -267,13 +275,43 @@ export default function EventForm() {
     const addArea = () => setWorkAreas([...workAreas, { name: '', description: '', capacity: 5 }]);
     const removeArea = (index: number) => setWorkAreas(workAreas.filter((_, i) => i !== index));
 
+    // --- ÚJ: Funkció választható opciók ---
+    const purposeOptions = [
+        { value: 'GENERAL', label: 'Általános kérdés (Nincs extra funkció)' },
+        { value: 'DIETARY_PREFERENCE', label: 'Étkezési igény (QR Büfé modulhoz)' },
+        { value: 'TSHIRT_SIZE', label: 'Pólóméret (Raktár modulhoz)' },
+    ];
+
     const handleQuestionChange = (index: number, field: keyof EventQuestionInput, value: string | boolean) => {
         const newQuestions = [...questions];
         newQuestions[index] = { ...newQuestions[index], [field]: value } as EventQuestionInput;
         if (field === 'questionType' && value === 'TEXT') newQuestions[index].options = '';
         setQuestions(newQuestions);
     };
-    const addQuestion = () => setQuestions([...questions, { questionText: '', questionType: 'TEXT', options: '', isRequired: false }]);
+
+    // --- ÚJ: Okos kitöltő logika ---
+    const handlePurposeChange = (index: number, newPurpose: QuestionPurpose) => {
+        const newQuestions = [...questions];
+        const q = newQuestions[index];
+        q.purpose = newPurpose;
+
+        if (newPurpose === 'DIETARY_PREFERENCE') {
+            q.questionText = 'Milyen étkezési igényeid vannak?';
+            q.questionType = 'DROPDOWN';
+            q.options = 'Normál,Vegetáriánus,Vegán,Gluténmentes,Laktózmentes';
+        } else if (newPurpose === 'TSHIRT_SIZE') {
+            q.questionText = 'Mi a pólóméreted?';
+            q.questionType = 'DROPDOWN';
+            q.options = 'XS,S,M,L,XL,XXL';
+        } else if (newPurpose === 'GENERAL') {
+            q.questionText = '';
+            q.options = '';
+        }
+        setQuestions(newQuestions);
+    };
+
+    // --- MÓDOSÍTOTT: Alapértelmezetten GENERAL-al hozza létre ---
+    const addQuestion = () => setQuestions([...questions, { questionText: '', questionType: 'TEXT', purpose: 'GENERAL', options: '', isRequired: false }]);
     const removeQuestion = (index: number) => setQuestions(questions.filter((_, i) => i !== index));
 
     const handleDelete = async () => {
@@ -756,9 +794,38 @@ export default function EventForm() {
                                             <DeleteIcon />
                                         </IconButton>
 
-                                        <Grid container spacing={2} sx={{ pr: { xs: 0, md: 4 }, mt: { xs: 3, md: 0 } }}>
-                                            <Grid size={{ xs: 12, md: 5 }}><TextField label="Kérdés" fullWidth size="small" value={q.questionText} onChange={(e) => handleQuestionChange(index, 'questionText', e.target.value)} required /></Grid>
+                                        <Grid container spacing={2} sx={{ pr: { xs: 0, md: 4 }, mt: { xs: 3, md: 0 }, alignItems: 'center' }}>
+
+                                            {/* 1. Kérdés Funkciója (Purpose) */}
                                             <Grid size={{ xs: 12, md: 4 }}>
+                                                <FormControl fullWidth size="small">
+                                                    <InputLabel>Rendszerfunkció (Opcionális)</InputLabel>
+                                                    <Select
+                                                        value={q.purpose || 'GENERAL'}
+                                                        label="Rendszerfunkció (Opcionális)"
+                                                        onChange={(e) => handlePurposeChange(index, e.target.value as QuestionPurpose)}
+                                                        sx={{
+                                                            bgcolor: q.purpose !== 'GENERAL'
+                                                                ? (isDarkMode ? 'rgba(129, 140, 248, 0.15)' : 'rgba(25, 118, 210, 0.05)')
+                                                                : 'transparent'
+                                                        }}
+                                                    >
+                                                        {purposeOptions.map(opt => (
+                                                            <MenuItem key={opt.value} value={opt.value} sx={{ fontWeight: opt.value !== 'GENERAL' ? 'bold' : 'normal' }}>
+                                                                {opt.label}
+                                                            </MenuItem>
+                                                        ))}
+                                                    </Select>
+                                                </FormControl>
+                                            </Grid>
+
+                                            {/* 2. Kérdés Szövege */}
+                                            <Grid size={{ xs: 12, md: 5 }}>
+                                                <TextField label="Kérdés szövege" fullWidth size="small" value={q.questionText} onChange={(e) => handleQuestionChange(index, 'questionText', e.target.value)} required />
+                                            </Grid>
+
+                                            {/* 3. Típus */}
+                                            <Grid size={{ xs: 12, md: 3 }}>
                                                 <FormControl fullWidth size="small">
                                                     <InputLabel>Válasz Típusa</InputLabel>
                                                     <Select value={q.questionType} label="Válasz Típusa" onChange={(e) => handleQuestionChange(index, 'questionType', e.target.value)}>
@@ -768,12 +835,14 @@ export default function EventForm() {
                                                     </Select>
                                                 </FormControl>
                                             </Grid>
-                                            <Grid size={{ xs: 12, md: 3 }} sx={{ display: 'flex', alignItems: 'center' }}>
-                                                <FormControlLabel control={<Checkbox checked={q.isRequired} onChange={(e) => handleQuestionChange(index, 'isRequired', e.target.checked)} color="primary" />} label="Kötelező" />
+
+                                            {/* Második sor: Kötelező kapcsoló és Válaszlehetőségek */}
+                                            <Grid size={{ xs: 12, md: 3 }} sx={{ display: 'flex', alignItems: 'center', mt: 1 }}>
+                                                <FormControlLabel control={<Checkbox checked={q.isRequired} onChange={(e) => handleQuestionChange(index, 'isRequired', e.target.checked)} color="primary" />} label="Kötelező kitölteni" />
                                             </Grid>
 
                                             {q.questionType !== 'TEXT' && (
-                                                <Grid size={{ xs: 12 }} sx={{ mt: 1 }}>
+                                                <Grid size={{ xs: 12, md: 9 }} sx={{ mt: 1 }}>
                                                     <TextField label="Válaszlehetőségek (vesszővel elválasztva)" fullWidth size="small" value={q.options} onChange={(e) => handleQuestionChange(index, 'options', e.target.value)} required />
                                                 </Grid>
                                             )}

@@ -92,7 +92,12 @@ public class EventService {
         if (dto.workAreas() != null) {
             for (WorkAreaDTO waDto : dto.workAreas()) {
                 event.getWorkAreas().add(WorkArea.builder()
-                        .name(waDto.name()).description(waDto.description()).capacity(waDto.capacity()).event(event).build());
+                        .name(waDto.name())
+                        .description(waDto.description())
+                        .capacity(waDto.capacity())
+                        // --- ÚJ: Étkezési keret mentése ---
+                        .mealsPerShift(waDto.mealsPerShift() != null ? waDto.mealsPerShift() : 0)
+                        .event(event).build());
             }
         }
 
@@ -100,6 +105,7 @@ public class EventService {
             for (EventQuestionDTO qDto : dto.questions()) {
                 event.getQuestions().add(EventQuestion.builder()
                         .questionText(qDto.questionText()).questionType(qDto.questionType())
+                        .purpose(qDto.purpose()!= null ? qDto.purpose() : com.example.volunteermanagement.model.QuestionPurpose.GENERAL)
                         .options(qDto.options()).isRequired(qDto.isRequired()).event(event).build());
             }
         }
@@ -176,7 +182,7 @@ public class EventService {
                         org != null ? new OrganizationDTO(
                                 org.getId(), org.getName(), org.getTenantId(),
                                 org.getAddress(), org.getDescription(), org.getEmail(), org.getPhone(),
-                                org.getLogoUrl(), org.getBannerUrl(), org.getCui() // <-- FIX: Added getCui()
+                                org.getLogoUrl(), org.getBannerUrl(), org.getCui()
                         ) : null
                 );
             });
@@ -210,7 +216,7 @@ public class EventService {
                         org != null ? new OrganizationDTO(
                                 org.getId(), org.getName(), org.getTenantId(),
                                 org.getAddress(), org.getDescription(), org.getEmail(), org.getPhone(),
-                                org.getLogoUrl(), org.getBannerUrl(), org.getCui() // <-- FIX: Added getCui()
+                                org.getLogoUrl(), org.getBannerUrl(), org.getCui()
                         ) : null
                 );
             });
@@ -299,9 +305,17 @@ public class EventService {
                                 existingWa.setName(waDto.name());
                                 existingWa.setDescription(waDto.description());
                                 existingWa.setCapacity(waDto.capacity());
+                                // --- ÚJ: Étkezési keret frissítése ---
+                                existingWa.setMealsPerShift(waDto.mealsPerShift() != null ? waDto.mealsPerShift() : 0);
                             });
                 } else {
-                    event.getWorkAreas().add(WorkArea.builder().name(waDto.name()).description(waDto.description()).capacity(waDto.capacity()).event(event).build());
+                    event.getWorkAreas().add(WorkArea.builder()
+                            .name(waDto.name())
+                            .description(waDto.description())
+                            .capacity(waDto.capacity())
+                            // --- ÚJ: Étkezési keret új területnél ---
+                            .mealsPerShift(waDto.mealsPerShift() != null ? waDto.mealsPerShift() : 0)
+                            .event(event).build());
                 }
             }
         } else {
@@ -318,11 +332,12 @@ public class EventService {
                             .ifPresent(existingQ -> {
                                 existingQ.setQuestionText(qDto.questionText());
                                 existingQ.setQuestionType(qDto.questionType());
+                                existingQ.setPurpose(qDto.purpose());
                                 existingQ.setOptions(qDto.options());
                                 existingQ.setRequired(qDto.isRequired());
                             });
                 } else {
-                    event.getQuestions().add(EventQuestion.builder().questionText(qDto.questionText()).questionType(qDto.questionType()).options(qDto.options()).isRequired(qDto.isRequired()).event(event).build());
+                    event.getQuestions().add(EventQuestion.builder().questionText(qDto.questionText()).questionType(qDto.questionType()).purpose(qDto.purpose()!= null ? qDto.purpose() : com.example.volunteermanagement.model.QuestionPurpose.GENERAL).options(qDto.options()).isRequired(qDto.isRequired()).event(event).build());
                 }
             }
         } else {
@@ -355,9 +370,14 @@ public class EventService {
                 event.getStartTime(), event.getEndTime(),
                 event.getApplicationDeadline(), event.isRegistrationOpen(),
                 event.getBannerUrl(),
-                event.getWorkAreas().stream().map(wa -> new WorkAreaDTO(wa.getId(), wa.getName(), wa.getDescription(), wa.getCapacity(), List.of())).toList(),
-                event.getQuestions().stream().map(q -> new EventQuestionDTO(q.getId(), q.getQuestionText(), q.getQuestionType(), q.getOptions(), q.isRequired())).toList(),
-                new OrganizationDTO(event.getOrganization().getId(), event.getOrganization().getName(), event.getOrganization().getTenantId(), event.getOrganization().getAddress(), event.getOrganization().getDescription(), event.getOrganization().getEmail(), event.getOrganization().getPhone(), event.getOrganization().getLogoUrl(), event.getOrganization().getBannerUrl(), event.getOrganization().getCui()) // <-- FIX: Added getCui()
+                // --- ÚJ: mealsPerShift és coordinatorIds beemelése a DTO-ba ---
+                event.getWorkAreas().stream().map(wa -> new WorkAreaDTO(
+                        wa.getId(), wa.getName(), wa.getDescription(), wa.getCapacity(),
+                        wa.getMealsPerShift() != null ? wa.getMealsPerShift() : 0,
+                        List.of()
+                )).toList(),
+                event.getQuestions().stream().map(q -> new EventQuestionDTO(q.getId(), q.getQuestionText(), q.getQuestionType(), q.getPurpose(), q.getOptions(), q.isRequired())).toList(),
+                new OrganizationDTO(event.getOrganization().getId(), event.getOrganization().getName(), event.getOrganization().getTenantId(), event.getOrganization().getAddress(), event.getOrganization().getDescription(), event.getOrganization().getEmail(), event.getOrganization().getPhone(), event.getOrganization().getLogoUrl(), event.getOrganization().getBannerUrl(), event.getOrganization().getCui())
         );
     }
 
@@ -367,9 +387,14 @@ public class EventService {
                 event.getStartTime(), event.getEndTime(),
                 event.getApplicationDeadline(), event.isRegistrationOpen(),
                 event.getBannerUrl(),
-                event.getWorkAreas().stream().map(wa -> new WorkAreaDTO(wa.getId(), wa.getName(), wa.getDescription(), wa.getCapacity(), List.of())).toList(),
-                event.getQuestions().stream().map(q -> new EventQuestionDTO(q.getId(), q.getQuestionText(), q.getQuestionType(), q.getOptions(), q.isRequired())).toList(),
-                new OrganizationDTO(org.getId(), org.getName(), org.getTenantId(), org.getAddress(), org.getDescription(), org.getEmail(), org.getPhone(), org.getLogoUrl(), org.getBannerUrl(), org.getCui()) // <-- FIX: Added getCui()
+                // --- ÚJ: mealsPerShift és coordinatorIds beemelése a DTO-ba ---
+                event.getWorkAreas().stream().map(wa -> new WorkAreaDTO(
+                        wa.getId(), wa.getName(), wa.getDescription(), wa.getCapacity(),
+                        wa.getMealsPerShift() != null ? wa.getMealsPerShift() : 0,
+                        List.of()
+                )).toList(),
+                event.getQuestions().stream().map(q -> new EventQuestionDTO(q.getId(), q.getQuestionText(), q.getQuestionType(),q.getPurpose(), q.getOptions(), q.isRequired())).toList(),
+                new OrganizationDTO(org.getId(), org.getName(), org.getTenantId(), org.getAddress(), org.getDescription(), org.getEmail(), org.getPhone(), org.getLogoUrl(), org.getBannerUrl(), org.getCui())
         );
     }
 
@@ -398,7 +423,12 @@ public class EventService {
         Event event = eventRepository.findById(eventId)
                 .orElseThrow(() -> new RuntimeException("Esemény nem található!"));
         return event.getWorkAreas().stream()
-                .map(area -> new WorkAreaDTO(area.getId(), area.getName(), area.getDescription(), area.getCapacity(), List.of()))
+                // --- ÚJ: mealsPerShift és coordinatorIds beemelése a DTO-ba ---
+                .map(wa -> new WorkAreaDTO(
+                        wa.getId(), wa.getName(), wa.getDescription(), wa.getCapacity(),
+                        wa.getMealsPerShift() != null ? wa.getMealsPerShift() : 0,
+                        List.of()
+                ))
                 .collect(Collectors.toList());
     }
 

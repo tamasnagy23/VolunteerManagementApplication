@@ -26,16 +26,21 @@ public class EventQuestion {
     @Column(nullable = false)
     private String questionText; // pl. "Mi a pólóméreted?"
 
+    // Ez mondja meg a frontendnek, hogy mit rajzoljon ki (TEXT, DROPDOWN, stb.)
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
     private QuestionType questionType;
+
+    // --- ÚJ MEZŐ: Ez mondja meg a backendnek a funkciót ---
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, columnDefinition = "varchar(255) default 'GENERAL'")
+    private QuestionPurpose purpose = QuestionPurpose.GENERAL;
 
     // Ha a típus DROPDOWN vagy CHECKBOX, itt tároljuk a válaszlehetőségeket vesszővel elválasztva (pl. "S,M,L,XL")
     private String options;
 
     private boolean isRequired;
 
-    // --- ÚJ MEZŐ: Törlés időpontja ---
     @Column(name = "deleted_at")
     private LocalDateTime deletedAt;
 
