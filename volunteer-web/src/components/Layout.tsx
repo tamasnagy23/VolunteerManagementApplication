@@ -18,6 +18,8 @@ import ArrowBackIosNewIcon from '@mui/icons-material/ArrowBackIosNew';
 
 import { useThemeToggle } from '../theme/ThemeContextProvider';
 
+import GlobalQrFab from '../components/GlobalQrFab';
+
 interface UserProfile {
     name: string;
     email: string;
@@ -542,6 +544,7 @@ export default function Layout() {
                     <LogoutIcon sx={{ mr: 1.5, fontSize: 20 }} /> Kijelentkezés
                 </MenuItem>
             </Menu>
+            < GlobalQrFab />
         </Box>
     );
 }

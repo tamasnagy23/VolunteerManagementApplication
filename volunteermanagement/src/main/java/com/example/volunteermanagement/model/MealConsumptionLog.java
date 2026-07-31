@@ -30,6 +30,11 @@ public class MealConsumptionLog {
     @JoinColumn(name = "scanned_by_id", nullable = false)
     private User scannedBy;
 
+    // --- ÚJ MEZŐ: A kiadott étkezés típusa (Reggeli, Ebéd, Vacsora) ---
+    @Enumerated(EnumType.STRING)
+    @Column(name = "meal_type", nullable = false)
+    private MealType mealType;
+
     // A pontos időbélyeg, amikor a tranzakció történt
     @Column(nullable = false)
     private LocalDateTime consumedAt;

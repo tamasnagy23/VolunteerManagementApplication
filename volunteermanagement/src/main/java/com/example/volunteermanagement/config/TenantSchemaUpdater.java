@@ -22,10 +22,9 @@ public class TenantSchemaUpdater implements CommandLineRunner {
 
     @Override
     public void run(String... args) throws Exception {
-        // 1. Lekérjük az összes létező szervezetet
         List<Organization> organizations = organizationRepository.findAll();
 
-        // 2. A táblát létrehozó SQL parancs (IF NOT EXISTS - így nem ront el semmit, ha már létezik)
+        // A dokumentum tábla létrehozása (eredeti kódod)
         String createTableSql = """
             CREATE TABLE IF NOT EXISTS documents (
                 id BIGSERIAL PRIMARY KEY,
@@ -41,30 +40,49 @@ public class TenantSchemaUpdater implements CommandLineRunner {
             );
         """;
 
+        // --- ÚJ SQL: Az étkezési napló tábla létrehozása ---
+        String createMealLogTableSql = """
+            CREATE TABLE IF NOT EXISTS meal_consumption_log (
+                id BIGSERIAL PRIMARY KEY,
+                volunteer_id BIGINT NOT NULL,
+                event_id BIGINT NOT NULL,
+                scanned_by_id BIGINT NOT NULL,
+                meal_type VARCHAR(255) NOT NULL,
+                consumed_at TIMESTAMP NOT NULL,
+                dietary_preference VARCHAR(255)
+            );
+        """;
+
+        // A jogosultság ellenőrzés frissítése
+        String dropConstraintSql = "ALTER TABLE event_team_members DROP CONSTRAINT IF EXISTS event_team_members_role_check;";
+        String addConstraintSql = "ALTER TABLE event_team_members ADD CONSTRAINT event_team_members_role_check CHECK (role IN ('ORGANIZER', 'COORDINATOR', 'MEAL_SCANNER'));";
+
         System.out.println("⏳ Tenant adatbázisok sémájának ellenőrzése és frissítése...");
 
-        // 3. Végigmegyünk az összes szervezeten
         for (Organization org : organizations) {
-            // A dedikált tenantId mezőt kérjük le (ami nálad már eleve String)
             String tenantId = org.getTenantId();
 
-            // Ha valamiért üres lenne a tenantId (pl. hibás rekord), akkor átugorjuk
             if (tenantId == null || tenantId.trim().isEmpty()) {
                 continue;
             }
 
             try {
-                // A te setCurrentTenant metódusodat használjuk!
                 TenantContext.setCurrentTenant(tenantId);
 
-                // Lefuttatjuk az SQL-t a tenant adatbázisban
+                // 1. Lefuttatjuk a dokumentum tábla ellenőrzést
                 jdbcTemplate.execute(createTableSql);
 
-                System.out.println("✅ Documents tábla ellenőrizve a tenantban: " + tenantId);
+                // 2. Lefuttatjuk az ÚJ étkezési napló tábla létrehozását
+                jdbcTemplate.execute(createMealLogTableSql);
+
+                // 3. Lefuttatjuk a jogosultság constraint frissítését
+                jdbcTemplate.execute(dropConstraintSql);
+                jdbcTemplate.execute(addConstraintSql);
+
+                System.out.println("✅ Séma és jogosultságok frissítve a tenantban: " + tenantId);
             } catch (Exception e) {
                 System.err.println("❌ Hiba a tenant frissítésekor (" + tenantId + "): " + e.getMessage());
             } finally {
-                // Mindig kitakarítjuk a contextet a ciklus végén!
                 TenantContext.clear();
             }
         }

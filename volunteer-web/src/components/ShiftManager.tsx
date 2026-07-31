@@ -65,6 +65,9 @@ interface Shift {
     endTime: string;
     maxVolunteers: number;
     maxBackupVolunteers: number;
+    providedBreakfasts: number;
+    providedLunches: number;
+    providedDinners: number;
     type: 'WORK' | 'MEETING' | 'PERSONAL';
     description?: string;
     assignedUsers: AssignedUser[];
@@ -184,7 +187,16 @@ export default function ShiftManager() {
     const [editingShiftId, setEditingShiftId] = useState<number | null>(null);
     const [targetWorkAreaId, setTargetWorkAreaId] = useState<number | string | null>(null);
 
-    const [newShiftData, setNewShiftData] = useState({ name: '', maxVolunteers: 5, maxBackupVolunteers: 0, type: 'WORK', description: '' });
+    const [newShiftData, setNewShiftData] = useState({
+        name: '',
+        maxVolunteers: 5,
+        maxBackupVolunteers: 0,
+        providedBreakfasts: 0,
+        providedLunches: 0,
+        providedDinners: 0,
+        type: 'WORK',
+        description: ''
+    });
 
     const [shiftStartDate, setShiftStartDate] = useState<Date | null>(null);
     const [shiftStartTime, setShiftStartTime] = useState<Date | null>(null);
@@ -247,25 +259,18 @@ export default function ShiftManager() {
         }
     };
 
-    // =======================================================================
-    // SZIGORÍTOTT JOGOSULTSÁGKEZELÉS (Kiskapu bezárva)
-    // =======================================================================
-
     const canCreateGlobal = useMemo(() => {
         if (!myPermissions) return false;
-        // SZIGORÍTÁS: Csak Főszervező és Rendszergazda hozhat létre Globális Gyűlést! (MANAGE_SHIFTS jog nem elég)
         return myPermissions.globalAdmin || myPermissions.eventRole === 'ORGANIZER';
     }, [myPermissions]);
 
     const canManageArea = (areaId: number | string | null) => {
         if (areaId === 'global' || areaId === null) return canCreateGlobal;
-        if (canCreateGlobal) return true; // A Főszervezők mindenhez is hozzáférnek
+        if (canCreateGlobal) return true;
         if (!myPermissions) return false;
 
-        // Ha van általános műszak-szervező joga, akkor az összes területet kezelheti
         if (myPermissions.permissions.includes('MANAGE_SHIFTS')) return true;
 
-        // Egyébként megvizsgáljuk, hogy Koordinátora-e az adott területnek
         return myPermissions.coordinatedWorkAreas.includes(Number(areaId));
     };
 
@@ -275,7 +280,6 @@ export default function ShiftManager() {
         if (shift.type === 'PERSONAL') return true;
         return canManageArea(shift.workAreaId || 'global');
     };
-    // =======================================================================
 
     const uniqueDates = useMemo(() => Array.from(new Set(shifts.map(s => formatDateWithDay(s.startTime)))).sort(), [shifts]);
 
@@ -381,6 +385,12 @@ export default function ShiftManager() {
 
             const normalCount = shift.assignedUsers?.filter(u => !u.isBackup).length || 0;
 
+            const mealTexts = [];
+            if (shift.providedBreakfasts > 0) mealTexts.push(`${shift.providedBreakfasts}x Reggeli`);
+            if (shift.providedLunches > 0) mealTexts.push(`${shift.providedLunches}x Ebéd`);
+            if (shift.providedDinners > 0) mealTexts.push(`${shift.providedDinners}x Vacsora`);
+            const finalMealText = mealTexts.length > 0 ? mealTexts.join(', ') : '-';
+
             return {
                 'Típus': shift.type === 'MEETING' ? 'Gyűlés' : shift.type === 'PERSONAL' ? 'Személyes' : 'Műszak',
                 'Munkaterület': shift.workAreaName || 'Globális',
@@ -388,12 +398,13 @@ export default function ShiftManager() {
                 'Nap': formatDateWithDay(shift.startTime),
                 'Kezdés': formatTimeOnly(shift.startTime), 'Befejezés': formatTimeOnly(shift.endTime),
                 'Kapacitás': shift.type === 'PERSONAL' ? '-' : `${normalCount} / ${shift.maxVolunteers} (+${shift.maxBackupVolunteers} beugró)`,
+                'Étkezés': finalMealText,
                 'Státusz': normalCount >= shift.maxVolunteers ? 'Betelt' : 'Van hely',
                 'Érintettek': volunteers
             };
         });
         const worksheet = XLSX.utils.json_to_sheet(excelData);
-        worksheet['!cols'] = [{ wch: 15 }, { wch: 20 }, { wch: 20 }, { wch: 25 }, { wch: 10 }, { wch: 10 }, { wch: 15 }, { wch: 15 }, { wch: 50 }];
+        worksheet['!cols'] = [{ wch: 15 }, { wch: 20 }, { wch: 20 }, { wch: 25 }, { wch: 10 }, { wch: 10 }, { wch: 15 }, { wch: 20 }, { wch: 15 }, { wch: 50 }];
         const workbook = XLSX.utils.book_new();
         XLSX.utils.book_append_sheet(workbook, worksheet, "Beosztás");
         XLSX.writeFile(workbook, `Beosztas_${event?.title || 'esemeny'}.xlsx`);
@@ -418,7 +429,16 @@ export default function ShiftManager() {
         setTargetWorkAreaId(defaultWaId);
         setAutoAssignApplicationId(null);
         setEditMode(false);
-        setNewShiftData({ name: '', maxVolunteers: 5, maxBackupVolunteers: 0, type: 'WORK', description: '' });
+        setNewShiftData({
+            name: '',
+            maxVolunteers: 5,
+            maxBackupVolunteers: 0,
+            providedBreakfasts: 0,
+            providedLunches: 0,
+            providedDinners: 0,
+            type: 'WORK',
+            description: ''
+        });
 
         const now = new Date();
         const start = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 8, 0);
@@ -468,7 +488,16 @@ export default function ShiftManager() {
         }
 
         setEditMode(false);
-        setNewShiftData({ name: '', maxVolunteers: 5, maxBackupVolunteers: 0, type: 'WORK', description: '' });
+        setNewShiftData({
+            name: '',
+            maxVolunteers: 5,
+            maxBackupVolunteers: 0,
+            providedBreakfasts: 0,
+            providedLunches: 0,
+            providedDinners: 0,
+            type: 'WORK',
+            description: ''
+        });
 
         setShiftStartDate(start);
         setShiftStartTime(start);
@@ -493,6 +522,9 @@ export default function ShiftManager() {
             name: shift.name || '',
             maxVolunteers: shift.maxVolunteers,
             maxBackupVolunteers: shift.maxBackupVolunteers || 0,
+            providedBreakfasts: shift.providedBreakfasts || 0,
+            providedLunches: shift.providedLunches || 0,
+            providedDinners: shift.providedDinners || 0,
             type: shift.type,
             description: shift.description || ''
         });
@@ -766,7 +798,6 @@ export default function ShiftManager() {
                                         <Paper elevation={0} sx={{ p: 4, mb: 3, textAlign: 'center', borderRadius: 4, bgcolor: isDarkMode ? 'rgba(255,255,255,0.02)' : '#f8fafc', border: '1px dashed', borderColor: isDarkMode ? 'rgba(255,255,255,0.1)' : 'divider' }}>
                                             <Typography variant="h6" color="text.secondary" fontWeight="bold" mb={1}>Üres Munkaterület</Typography>
                                             <Typography variant="body2" color="text.secondary" mb={2}>Még nem hoztál létre beosztást ezen a területen.</Typography>
-                                            {/* JAVÍTÁS: Itt zártuk be a kiskaput az üres állapotnál is! */}
                                             {hasAccess && (
                                                 <Button variant="outlined" color="primary" startIcon={<AddIcon />} onClick={() => handleOpenCreateModal(area.id)}>
                                                     Első műszak létrehozása
@@ -1122,10 +1153,28 @@ export default function ShiftManager() {
                     </Box>
 
                     {newShiftData.type === 'WORK' && (
-                        <Box display="flex" gap={2} mt={2}>
-                            <TextField type="number" label="Létszám (Max fő)" fullWidth value={newShiftData.maxVolunteers} onChange={(e) => setNewShiftData({...newShiftData, maxVolunteers: parseInt(e.target.value) || 0})} disabled={actionLoading} sx={{ '& .MuiOutlinedInput-root': { bgcolor: isDarkMode ? 'rgba(0,0,0,0.2)' : 'white', borderRadius: 2 } }} />
-                            <TextField type="number" label="Beugrók (Max fő)" fullWidth value={newShiftData.maxBackupVolunteers} onChange={(e) => setNewShiftData({...newShiftData, maxBackupVolunteers: parseInt(e.target.value) || 0})} disabled={actionLoading} sx={{ '& .MuiOutlinedInput-root': { bgcolor: isDarkMode ? 'rgba(0,0,0,0.2)' : 'white', borderRadius: 2 } }} />
-                        </Box>
+                        <>
+                            <Box display="flex" gap={2} mt={2}>
+                                <TextField type="number" label="Létszám (Max fő)" fullWidth value={newShiftData.maxVolunteers} onChange={(e) => setNewShiftData({...newShiftData, maxVolunteers: parseInt(e.target.value) || 0})} disabled={actionLoading} sx={{ '& .MuiOutlinedInput-root': { bgcolor: isDarkMode ? 'rgba(0,0,0,0.2)' : 'white', borderRadius: 2 } }} />
+                                <TextField type="number" label="Beugrók (Max fő)" fullWidth value={newShiftData.maxBackupVolunteers} onChange={(e) => setNewShiftData({...newShiftData, maxBackupVolunteers: parseInt(e.target.value) || 0})} disabled={actionLoading} sx={{ '& .MuiOutlinedInput-root': { bgcolor: isDarkMode ? 'rgba(0,0,0,0.2)' : 'white', borderRadius: 2 } }} />
+                            </Box>
+
+                            {/* ÚJ: Étkezések különálló számlálói */}
+                            <Box sx={{ mt: 3, p: 2, borderRadius: 3, border: '1px solid', borderColor: isDarkMode ? 'rgba(255,255,255,0.1)' : 'divider', bgcolor: isDarkMode ? 'rgba(255,255,255,0.02)' : '#f8fafc' }}>
+                                <Typography variant="subtitle2" fontWeight="bold" color="text.secondary" mb={2}>🍽️ Biztosított étkezések (db / fő)</Typography>
+                                <Grid container spacing={2}>
+                                    <Grid size={{xs: 12, sm: 4}}>
+                                        <TextField type="number" label="🥐 Reggeli" fullWidth value={newShiftData.providedBreakfasts} onChange={(e) => setNewShiftData({...newShiftData, providedBreakfasts: parseInt(e.target.value) || 0})} disabled={actionLoading} sx={{ '& .MuiOutlinedInput-root': { bgcolor: isDarkMode ? 'rgba(0,0,0,0.4)' : 'white', borderRadius: 2 } }} />
+                                    </Grid>
+                                    <Grid size={{xs: 12, sm: 4}}>
+                                        <TextField type="number" label="🍲 Ebéd" fullWidth value={newShiftData.providedLunches} onChange={(e) => setNewShiftData({...newShiftData, providedLunches: parseInt(e.target.value) || 0})} disabled={actionLoading} sx={{ '& .MuiOutlinedInput-root': { bgcolor: isDarkMode ? 'rgba(0,0,0,0.4)' : 'white', borderRadius: 2 } }} />
+                                    </Grid>
+                                    <Grid size={{xs: 12, sm: 4}}>
+                                        <TextField type="number" label="🍕 Vacsora" fullWidth value={newShiftData.providedDinners} onChange={(e) => setNewShiftData({...newShiftData, providedDinners: parseInt(e.target.value) || 0})} disabled={actionLoading} sx={{ '& .MuiOutlinedInput-root': { bgcolor: isDarkMode ? 'rgba(0,0,0,0.4)' : 'white', borderRadius: 2 } }} />
+                                    </Grid>
+                                </Grid>
+                            </Box>
+                        </>
                     )}
                 </DialogContent>
                 <DialogActions sx={{ p: 2, px: 3, borderTop: '1px solid', borderColor: 'divider', bgcolor: isDarkMode ? 'rgba(0,0,0,0.2)' : '#f8fafc' }}>

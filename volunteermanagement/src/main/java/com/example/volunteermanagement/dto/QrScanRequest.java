@@ -1,5 +1,6 @@
 package com.example.volunteermanagement.dto;
 
+import com.example.volunteermanagement.model.MealType;
 import jakarta.validation.constraints.NotNull;
 
 public record QrScanRequest(
@@ -7,5 +8,9 @@ public record QrScanRequest(
         Long volunteerId,
 
         @NotNull(message = "Az esemény ID-ja nem lehet üres")
-        Long eventId
+        Long eventId,
+
+        // --- ÚJ MEZŐ: Milyen étkezést adunk épp ki? ---
+        @NotNull(message = "Az étkezés típusa kötelező (BREAKFAST, LUNCH, DINNER)")
+        MealType mealType
 ) {}

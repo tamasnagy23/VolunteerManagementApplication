@@ -41,7 +41,6 @@ public class ShiftService {
         String originalTenant = TenantContext.getCurrentTenant();
         List<ShiftDTO> resultDtos = new ArrayList<>();
 
-        // 1. Elfogadott önkéntesek és App ID-k kigyűjtése az aktuális Tenantból
         List<Application> approvedApps = applicationRepository.findByEventId(eventId).stream()
                 .filter(app -> app.getStatus() == ApplicationStatus.APPROVED)
                 .collect(Collectors.toList());
@@ -50,7 +49,6 @@ public class ShiftService {
                 .map(Application::getUserId)
                 .collect(Collectors.toList());
 
-        // 2. Aktuális Tenant műszakjai (Sima munka és Globális gyűlés)
         List<Shift> tenantShifts = shiftRepository.findAll().stream()
                 .filter(s -> (s.getWorkArea() != null && s.getWorkArea().getEvent().getId().equals(eventId)) ||
                         (s.getEvent() != null && s.getEvent().getId().equals(eventId)))
@@ -58,14 +56,11 @@ public class ShiftService {
 
         resultDtos.addAll(mapShiftsToDTOs(tenantShifts, eventId));
 
-        // 3. JAVÍTÁS: Átváltunk a Globális sémára, és egy ÚJ tranzakcióban kérjük le az adatokat!
         try {
             TenantContext.setCurrentTenant(null);
 
-            // Itt kötelező a 'self.' hívás, hogy kikényszerítse az ÚJ tranzakciót (REQUIRES_NEW)
             List<ShiftDTO> personalShifts = self.fetchPersonalShiftsForUsers(approvedUserIds);
 
-            // Visszatöltjük a Tenant specifikus Application ID-kat, hogy a szervező tudjon rájuk kattintani
             for (ShiftDTO shiftDto : personalShifts) {
                 List<AssignedUserDTO> updatedUsers = new ArrayList<>();
                 for (AssignedUserDTO au : shiftDto.assignedUsers()) {
@@ -80,7 +75,9 @@ public class ShiftService {
 
                 resultDtos.add(new ShiftDTO(
                         shiftDto.id(), null, "Személyes elfoglaltság", shiftDto.name(), shiftDto.startTime(), shiftDto.endTime(),
-                        shiftDto.maxVolunteers(), shiftDto.maxBackupVolunteers(), "PERSONAL", shiftDto.description(), updatedUsers
+                        shiftDto.maxVolunteers(), shiftDto.maxBackupVolunteers(),
+                        shiftDto.providedBreakfasts(), shiftDto.providedLunches(), shiftDto.providedDinners(),
+                        "PERSONAL", shiftDto.description(), updatedUsers
                 ));
             }
 
@@ -88,13 +85,12 @@ public class ShiftService {
             System.err.println("Globális személyes műszakok olvasása hiba: " + e.getMessage());
             e.printStackTrace();
         } finally {
-            TenantContext.setCurrentTenant(originalTenant); // Visszaváltás az eredeti szervezetre
+            TenantContext.setCurrentTenant(originalTenant);
         }
 
         return resultDtos;
     }
 
-    // --- ÚJ METÓDUS: Külön tranzakció (új adatbázis kapcsolat) a globális lekérdezéshez! ---
     @Transactional(propagation = Propagation.REQUIRES_NEW, readOnly = true)
     public List<ShiftDTO> fetchPersonalShiftsForUsers(List<Long> userIds) {
         List<Shift> personalShifts = shiftRepository.findAll().stream()
@@ -107,7 +103,7 @@ public class ShiftService {
                     .map(assignment -> {
                         User user = userRepository.findById(assignment.getUserId()).orElse(null);
                         return new AssignedUserDTO(
-                                null, // Ezt a hívó majd pótolja az eredeti Tenantból!
+                                null,
                                 assignment.getUserId(),
                                 user != null ? user.getName() : "Ismeretlen",
                                 user != null ? user.getEmail() : "Ismeretlen",
@@ -119,14 +115,15 @@ public class ShiftService {
 
             return new ShiftDTO(
                     shift.getId(), null, "Személyes", shift.getName(), shift.getStartTime(), shift.getEndTime(),
-                    shift.getMaxVolunteers(), shift.getMaxBackupVolunteers(), "PERSONAL", shift.getDescription(), assignedUsers
+                    shift.getMaxVolunteers(), shift.getMaxBackupVolunteers(),
+                    shift.getProvidedBreakfasts(), shift.getProvidedLunches(), shift.getProvidedDinners(),
+                    "PERSONAL", shift.getDescription(), assignedUsers
             );
         }).collect(Collectors.toList());
     }
 
     private List<ShiftDTO> mapShiftsToDTOs(List<Shift> shifts, Long eventId) {
 
-        // JAVÍTÁS: Betöltjük a csapatot, hogy tudjuk ki a vezető!
         List<EventTeamMember> teamMembers = eventTeamMemberRepository.findByEventId(eventId);
         List<Long> leaderIds = teamMembers.stream()
                 .filter(tm -> tm.getRole() == EventRole.ORGANIZER || tm.getRole() == EventRole.COORDINATOR)
@@ -135,7 +132,6 @@ public class ShiftService {
 
         return shifts.stream().map(shift -> {
             List<AssignedUserDTO> assignedUsers = shift.getAssignments().stream()
-                    // LÁGY SZŰRÉS: Ha a beosztott személy benne van a vezetők listájában, kihagyjuk!
                     .filter(assignment -> !leaderIds.contains(assignment.getUserId()))
                     .map(assignment -> {
                         User user = userRepository.findById(assignment.getUserId()).orElse(null);
@@ -151,6 +147,7 @@ public class ShiftService {
             return new ShiftDTO(shift.getId(), shift.getWorkArea() != null ? shift.getWorkArea().getId() : null,
                     shift.getWorkArea() != null ? shift.getWorkArea().getName() : (shift.getType() == ShiftType.PERSONAL ? "Személyes" : "Globális"),
                     shift.getName(), shift.getStartTime(), shift.getEndTime(), shift.getMaxVolunteers(), shift.getMaxBackupVolunteers(),
+                    shift.getProvidedBreakfasts(), shift.getProvidedLunches(), shift.getProvidedDinners(),
                     shift.getType() != null ? shift.getType().name() : "WORK", shift.getDescription(), assignedUsers);
         }).collect(Collectors.toList());
     }
@@ -194,24 +191,20 @@ public class ShiftService {
     @Transactional(propagation = Propagation.REQUIRES_NEW, readOnly = true)
     public List<MyShiftDTO> fetchMyShiftsForTenant(User user) {
 
-        // LÁGY SZŰRÉS 1: Kiderítjük, mely eseményeken lett a tag Vezető (Főszervező vagy Koordinátor)
         List<Long> leaderEventIds = eventTeamMemberRepository.findByUserId(user.getId()).stream()
                 .filter(tm -> tm.getRole() == EventRole.ORGANIZER || tm.getRole() == EventRole.COORDINATOR)
                 .filter(tm -> tm.getEvent() != null)
                 .map(tm -> tm.getEvent().getId())
                 .collect(Collectors.toList());
 
-        // A beosztások lekérése
         List<ShiftAssignment> assignments = shiftAssignmentRepository.findByUserId(user.getId()).stream()
                 .filter(a -> {
                     Shift shift = a.getShift();
-                    // A Személyes elfoglaltságokat mindig mutatjuk a naptárban!
                     if (shift.getType() == ShiftType.PERSONAL) return true;
 
                     Long eventId = shift.getEvent() != null ? shift.getEvent().getId() :
                             (shift.getWorkArea() != null ? shift.getWorkArea().getEvent().getId() : null);
 
-                    // LÁGY SZŰRÉS 2: Ha a felhasználó Vezető ezen az eseményen, akkor ELREJTJÜK a sima beosztásait a naptárából!
                     return eventId == null || !leaderEventIds.contains(eventId);
                 })
                 .collect(Collectors.toList());
@@ -407,6 +400,9 @@ public class ShiftService {
                 .endTime(dto.endTime())
                 .maxVolunteers(dto.maxVolunteers())
                 .maxBackupVolunteers(0)
+                .providedBreakfasts(0)
+                .providedLunches(0)
+                .providedDinners(0)
                 .type(ShiftType.MEETING)
                 .description(dto.description())
                 .assignments(new ArrayList<>())
@@ -417,7 +413,7 @@ public class ShiftService {
         auditLogService.logAction(requesterEmail, "CREATE_SHIFT", "Új Globális Gyűlés: " + dto.name(),
                 "Időpont: " + dto.startTime() + " - " + dto.endTime(), event.getOrganization().getId());
 
-        return new ShiftDTO(saved.getId(), null, "Globális", saved.getName(), saved.getStartTime(), saved.getEndTime(), saved.getMaxVolunteers(), saved.getMaxBackupVolunteers(), saved.getType().name(), saved.getDescription(), List.of());
+        return new ShiftDTO(saved.getId(), null, "Globális", saved.getName(), saved.getStartTime(), saved.getEndTime(), saved.getMaxVolunteers(), saved.getMaxBackupVolunteers(), saved.getProvidedBreakfasts(), saved.getProvidedLunches(), saved.getProvidedDinners(), saved.getType().name(), saved.getDescription(), List.of());
     }
 
     @Transactional
@@ -437,6 +433,9 @@ public class ShiftService {
                 .endTime(dto.endTime())
                 .maxVolunteers(dto.maxVolunteers())
                 .maxBackupVolunteers(dto.maxBackupVolunteers())
+                .providedBreakfasts(dto.providedBreakfasts())
+                .providedLunches(dto.providedLunches())
+                .providedDinners(dto.providedDinners())
                 .type(dto.type() != null ? ShiftType.valueOf(dto.type()) : ShiftType.WORK)
                 .description(dto.description())
                 .assignments(new ArrayList<>())
@@ -450,7 +449,7 @@ public class ShiftService {
         auditLogService.logAction(requesterEmail, "CREATE_SHIFT", "Új esemény: " + areaName,
                 "Időpont: " + dto.startTime() + " - " + dto.endTime() + " (Max: " + dto.maxVolunteers() + " fő, Beugró: " + dto.maxBackupVolunteers() + ")", orgId);
 
-        return new ShiftDTO(saved.getId(), workAreaId, areaName, saved.getName(), saved.getStartTime(), saved.getEndTime(), saved.getMaxVolunteers(), saved.getMaxBackupVolunteers(), saved.getType().name(), saved.getDescription(), List.of());
+        return new ShiftDTO(saved.getId(), workAreaId, areaName, saved.getName(), saved.getStartTime(), saved.getEndTime(), saved.getMaxVolunteers(), saved.getMaxBackupVolunteers(), saved.getProvidedBreakfasts(), saved.getProvidedLunches(), saved.getProvidedDinners(), saved.getType().name(), saved.getDescription(), List.of());
     }
 
     @Transactional
@@ -465,6 +464,9 @@ public class ShiftService {
                 .endTime(dto.endTime())
                 .maxVolunteers(1)
                 .maxBackupVolunteers(0)
+                .providedBreakfasts(0)
+                .providedLunches(0)
+                .providedDinners(0)
                 .type(ShiftType.PERSONAL)
                 .assignments(new ArrayList<>())
                 .build();
@@ -483,7 +485,7 @@ public class ShiftService {
         auditLogService.logAction(userEmail, "CREATE_PERSONAL_SHIFT", "Személyes elfoglaltság rögzítve",
                 "Megnevezés: " + dto.description() + " | Idő: " + dto.startTime(), null);
 
-        return new ShiftDTO(savedShift.getId(), null, "Személyes elfoglaltság", savedShift.getName(), savedShift.getStartTime(), savedShift.getEndTime(), savedShift.getMaxVolunteers(), savedShift.getMaxBackupVolunteers(), savedShift.getType().name(), savedShift.getDescription(), List.of());
+        return new ShiftDTO(savedShift.getId(), null, "Személyes elfoglaltság", savedShift.getName(), savedShift.getStartTime(), savedShift.getEndTime(), savedShift.getMaxVolunteers(), savedShift.getMaxBackupVolunteers(), savedShift.getProvidedBreakfasts(), savedShift.getProvidedLunches(), savedShift.getProvidedDinners(), savedShift.getType().name(), savedShift.getDescription(), List.of());
     }
 
     @Transactional
@@ -503,6 +505,11 @@ public class ShiftService {
         shift.setMaxVolunteers(dto.maxVolunteers());
         shift.setMaxBackupVolunteers(dto.maxBackupVolunteers());
 
+        // Mentjük az új mezőket a módosítás során
+        shift.setProvidedBreakfasts(dto.providedBreakfasts());
+        shift.setProvidedLunches(dto.providedLunches());
+        shift.setProvidedDinners(dto.providedDinners());
+
         if (dto.type() != null) shift.setType(ShiftType.valueOf(dto.type()));
         if (dto.description() != null) shift.setDescription(dto.description());
 
@@ -514,7 +521,7 @@ public class ShiftService {
         auditLogService.logAction(requesterEmail, "UPDATE_SHIFT", "Műszak/Gyűlés módosítva: " + areaName,
                 "Régi: " + oldStats + " -> Új: Idő: " + dto.startTime() + " - " + dto.endTime() + " (Max: " + dto.maxVolunteers() + ", Beugró: " + dto.maxBackupVolunteers() + ")", orgId);
 
-        return new ShiftDTO(updated.getId(), updated.getWorkArea() != null ? updated.getWorkArea().getId() : null, areaName, updated.getName(), updated.getStartTime(), updated.getEndTime(), updated.getMaxVolunteers(), updated.getMaxBackupVolunteers(), updated.getType().name(), updated.getDescription(), List.of());
+        return new ShiftDTO(updated.getId(), updated.getWorkArea() != null ? updated.getWorkArea().getId() : null, areaName, updated.getName(), updated.getStartTime(), updated.getEndTime(), updated.getMaxVolunteers(), updated.getMaxBackupVolunteers(), updated.getProvidedBreakfasts(), updated.getProvidedLunches(), updated.getProvidedDinners(), updated.getType().name(), updated.getDescription(), List.of());
     }
 
     @Transactional

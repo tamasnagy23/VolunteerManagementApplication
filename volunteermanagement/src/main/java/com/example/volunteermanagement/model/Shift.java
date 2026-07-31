@@ -35,10 +35,22 @@ public class Shift {
     @Column(nullable = false)
     private int maxVolunteers;
 
-    // --- ÚJ: Maximális beugrók (készenlétisek) száma ---
     @Column(nullable = false)
     @Builder.Default
     private int maxBackupVolunteers = 0;
+
+    // --- ÚJ: Külön étkezés-számlálók ---
+    @Column(name = "provided_breakfasts", nullable = false)
+    @Builder.Default
+    private int providedBreakfasts = 0;
+
+    @Column(name = "provided_lunches", nullable = false)
+    @Builder.Default
+    private int providedLunches = 0;
+
+    @Column(name = "provided_dinners", nullable = false)
+    @Builder.Default
+    private int providedDinners = 0;
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "event_id")

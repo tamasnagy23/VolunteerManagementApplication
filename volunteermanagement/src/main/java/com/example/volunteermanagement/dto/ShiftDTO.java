@@ -11,9 +11,12 @@ public record ShiftDTO(
         LocalDateTime startTime,
         LocalDateTime endTime,
         int maxVolunteers,
-
-        // --- ÚJ: Ezt is kiküldjük és fogadjuk a Reactből ---
         int maxBackupVolunteers,
+
+        // --- ÚJ: Étel számlálók a frontend felé/felől ---
+        int providedBreakfasts,
+        int providedLunches,
+        int providedDinners,
 
         String type,
         String description,

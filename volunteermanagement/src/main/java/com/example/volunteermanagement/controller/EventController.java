@@ -1,10 +1,8 @@
 package com.example.volunteermanagement.controller;
 
-import com.example.volunteermanagement.dto.EventDTO;
+import com.example.volunteermanagement.dto.*;
+import com.example.volunteermanagement.model.User;
 import com.example.volunteermanagement.service.EventSecurityService;
-import com.example.volunteermanagement.dto.EventPermissionsDTO;
-import com.example.volunteermanagement.dto.ShiftDTO;
-import com.example.volunteermanagement.dto.WorkAreaDTO;
 import com.example.volunteermanagement.model.Event;
 import com.example.volunteermanagement.service.EventService;
 import com.example.volunteermanagement.service.EventTeamService;
@@ -18,6 +16,7 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
@@ -191,5 +190,22 @@ public class EventController {
     @PreAuthorize("isAuthenticated()")
     public ResponseEntity<List<Map<String, Object>>> getEventContacts(@PathVariable Long id) {
         return ResponseEntity.ok(eventService.getEventContacts(id));
+    }
+
+    @GetMapping("/scanner-allowed")
+    public ResponseEntity<List<EventScannerOptionDTO>> getScannerAllowedEvents(
+            @AuthenticationPrincipal User currentUser) {
+
+        // 1. Lekérjük az ID-t a bejelentkezett User objektumból
+        Long currentUserId = currentUser.getId();
+
+        // 2. Ellenőrizzük, hogy Rendszergazda-e
+        // Mivel van Role.java osztályod, feltételezem, hogy a User-nek van getRole() metódusa
+        boolean isSysAdmin = currentUser.getRole().name().equals("SYS_ADMIN");
+
+        // 3. Lekérjük a szűrt listát a Service-től
+        List<EventScannerOptionDTO> events = eventService.getScannerAllowedEvents(currentUserId, isSysAdmin);
+
+        return ResponseEntity.ok(events);
     }
 }

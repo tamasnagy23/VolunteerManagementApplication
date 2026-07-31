@@ -25,11 +25,12 @@ public class MealController {
         // A Spring Security-ből kiszedjük, hogy ki olvasta be a kódot (a pultos emailje)
         String scannerEmail = authentication.getName();
 
-        // Átadjuk a munkát a Service-nek
+        // Átadjuk a munkát a Service-nek (Most már átadjuk a mealType-ot is!)
         Map<String, Object> result = mealService.processQrScan(
                 request.volunteerId(),
                 request.eventId(),
-                scannerEmail
+                scannerEmail,
+                request.mealType()
         );
 
         // Ha a success true, akkor 200 OK, ha false, akkor 400 Bad Request formájában küldjük vissza

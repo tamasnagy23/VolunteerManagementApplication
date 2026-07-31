@@ -17,13 +17,13 @@ import SupervisorAccountIcon from '@mui/icons-material/SupervisorAccount';
 import SearchIcon from '@mui/icons-material/Search';
 import PersonOutlineIcon from '@mui/icons-material/PersonOutline';
 import PhoneIcon from '@mui/icons-material/Phone';
-import StarIcon from '@mui/icons-material/Star'; // ÚJ IKON AZ ALAPÍTÓNAK
-import ShieldIcon from '@mui/icons-material/Shield'; // ÚJ IKON A SYS ADMINNAK
+import StarIcon from '@mui/icons-material/Star';
+import ShieldIcon from '@mui/icons-material/Shield';
+import QrCodeScannerIcon from '@mui/icons-material/QrCodeScanner';
 
 import api from '../api/axios';
 import LoadingScreen from "./LoadingScreen.tsx";
 
-// --- JAVÍTÁS: Új mezők a Backendből (isSysAdmin, orgRole) ---
 interface EventTeamMember {
     userId: number;
     userName: string;
@@ -33,8 +33,8 @@ interface EventTeamMember {
     eventRole: string | null;
     permissions: string[];
     coordinatedWorkAreaIds: number[];
-    isSysAdmin?: boolean; // <-- ÚJ
-    orgRole?: string;     // <-- ÚJ ('OWNER', 'ORGANIZER', 'VOLUNTEER')
+    isSysAdmin?: boolean;
+    orgRole?: string;
 }
 
 interface WorkArea {
@@ -160,26 +160,28 @@ export default function EventTeamManager() {
         setDetailsModalOpen(true);
     };
 
-    const getColorHex = (c: 'default' | 'primary' | 'secondary' | 'info') => {
+    const getColorHex = (c: 'default' | 'primary' | 'secondary' | 'info' | 'success') => {
         if (c === 'primary') return theme.palette.primary.main;
         if (c === 'secondary') return theme.palette.secondary.main;
         if (c === 'info') return theme.palette.info.main;
+        if (c === 'success') return theme.palette.success.main;
         return isDarkMode ? theme.palette.grey[400] : theme.palette.grey[600];
     };
 
-    const getRoleColor = (member: EventTeamMember): 'default' | 'primary' | 'secondary' | 'info' => {
+    const getRoleColor = (member: EventTeamMember): 'default' | 'primary' | 'secondary' | 'info' | 'success' => {
         if (member.isSysAdmin) return 'primary';
         if (member.orgRole === 'OWNER' || member.orgRole === 'ORGANIZER') return 'secondary';
         if (member.eventRole === 'ORGANIZER') return 'secondary';
         if (member.eventRole === 'COORDINATOR') return 'info';
+        if (member.eventRole === 'MEAL_SCANNER') return 'success';
         return 'default';
     };
 
-    const renderChipGroup = (items: string[], title: string, color: 'default' | 'primary' | 'secondary' | 'info' = 'default', limit: number = 2) => {
+    const renderChipGroup = (items: string[], title: string, color: 'default' | 'primary' | 'secondary' | 'info' | 'success' = 'default', limit: number = 2) => {
         if (items.length === 0) return <Typography variant="caption" color="text.secondary">-</Typography>;
 
         const hexColor = getColorHex(color);
-        const textColor = isDarkMode ? (color === 'primary' ? '#93c5fd' : color === 'secondary' ? '#f9a8d4' : color === 'info' ? '#67e8f9' : '#f8fafc') : 'inherit';
+        const textColor = isDarkMode ? (color === 'primary' ? '#93c5fd' : color === 'secondary' ? '#f9a8d4' : color === 'info' ? '#67e8f9' : color === 'success' ? '#86efac' : '#f8fafc') : 'inherit';
 
         const chipStyle = {
             bgcolor: isDarkMode ? alpha(hexColor, 0.15) : 'transparent',
@@ -224,7 +226,6 @@ export default function EventTeamManager() {
         );
     };
 
-    // --- ÚJ: Komponens a Jogosultság plecsni rendereléséhez ---
     const renderRoleBadge = (member: EventTeamMember) => {
         if (member.isSysAdmin) {
             return <Chip icon={<ShieldIcon />} label="Rendszergazda" color="primary" size="small" sx={{ fontWeight: 'bold', borderRadius: 1.5 }} />;
@@ -241,6 +242,9 @@ export default function EventTeamManager() {
         if (member.eventRole === 'COORDINATOR') {
             return <Chip icon={<SupervisorAccountIcon />} label="Koordinátor" color="info" size="small" sx={{ fontWeight: 'bold', borderRadius: 1.5 }} />;
         }
+        if (member.eventRole === 'MEAL_SCANNER') {
+            return <Chip icon={<QrCodeScannerIcon />} label="Pultos (Szkenner)" color="success" size="small" sx={{ fontWeight: 'bold', borderRadius: 1.5 }} />;
+        }
         return <Chip label="Sima Önkéntes" variant="outlined" size="small" sx={{ borderRadius: 1.5, color: 'text.secondary' }} />;
     };
 
@@ -256,6 +260,9 @@ export default function EventTeamManager() {
             if (roleFilter === 'COORDINATOR') {
                 matchesRole = member.eventRole === 'COORDINATOR';
             }
+            if (roleFilter === 'MEAL_SCANNER') {
+                matchesRole = member.eventRole === 'MEAL_SCANNER';
+            }
             if (roleFilter === 'VOLUNTEER') {
                 matchesRole = !member.eventRole && member.orgRole !== 'OWNER' && member.orgRole !== 'ORGANIZER' && !member.isSysAdmin;
             }
@@ -263,11 +270,12 @@ export default function EventTeamManager() {
             return matchesSearch && matchesRole;
         }).sort((a, b) => {
             const roleWeight = (m: EventTeamMember) => {
-                if (m.isSysAdmin) return 5;
-                if (m.orgRole === 'OWNER') return 4;
-                if (m.orgRole === 'ORGANIZER') return 3;
-                if (m.eventRole === 'ORGANIZER') return 3;
-                if (m.eventRole === 'COORDINATOR') return 2;
+                if (m.isSysAdmin) return 6;
+                if (m.orgRole === 'OWNER') return 5;
+                if (m.orgRole === 'ORGANIZER') return 4;
+                if (m.eventRole === 'ORGANIZER') return 4;
+                if (m.eventRole === 'COORDINATOR') return 3;
+                if (m.eventRole === 'MEAL_SCANNER') return 2;
                 return 1;
             };
             const weightA = roleWeight(a);
@@ -326,6 +334,7 @@ export default function EventTeamManager() {
                             <MenuItem value="ALL">Összes résztvevő</MenuItem>
                             <MenuItem value="ORGANIZER">Főszervezők (Adminek is)</MenuItem>
                             <MenuItem value="COORDINATOR">Koordinátorok</MenuItem>
+                            <MenuItem value="MEAL_SCANNER">Pultosok (Szkennerek)</MenuItem>
                             <MenuItem value="VOLUNTEER">Sima Önkéntesek</MenuItem>
                         </Select>
                     </FormControl>
@@ -348,7 +357,6 @@ export default function EventTeamManager() {
                                     const rColorHex = getColorHex(rColorName);
                                     const uPhone = member.phoneNumber || 'Nincs adat';
 
-                                    // JAVÍTÁS: Ezt az embert tilos szerkeszteni, mert amúgy is "Isten" a rendszerben
                                     const isUneditable = Boolean(member.isSysAdmin) || member.orgRole === 'OWNER' || member.orgRole === 'ORGANIZER';
 
                                     return (
@@ -547,7 +555,6 @@ export default function EventTeamManager() {
                     </Box>
                 )}
 
-                {/* MODALOK RÉSZE VÁLTOZATLAN MARAD, KIVÉVE A SZÍNEKET EGY PICSIT */}
                 <Dialog
                     open={detailsModalOpen} onClose={() => setDetailsModalOpen(false)} maxWidth="xs" fullWidth
                     PaperProps={{
@@ -601,6 +608,7 @@ export default function EventTeamManager() {
                                 sx={{ borderRadius: 2, bgcolor: isDarkMode ? 'rgba(0,0,0,0.2)' : 'white' }}
                             >
                                 <MenuItem value="NONE"><Typography fontWeight={draftRole === 'NONE' ? 'bold' : 'normal'}>Sima Önkéntes (Nincs szervezői joga)</Typography></MenuItem>
+                                <MenuItem value="MEAL_SCANNER"><Typography fontWeight={draftRole === 'MEAL_SCANNER' ? 'bold' : 'normal'} color="success.main">Pultos (Ételkiadás / Szkenner)</Typography></MenuItem>
                                 <MenuItem value="COORDINATOR"><Typography fontWeight={draftRole === 'COORDINATOR' ? 'bold' : 'normal'} color="info.main">Koordinátor (Korlátozott jogok)</Typography></MenuItem>
                                 <MenuItem value="ORGANIZER"><Typography fontWeight={draftRole === 'ORGANIZER' ? 'bold' : 'normal'} color="secondary.main">Főszervező (Mindenhez van joga)</Typography></MenuItem>
                             </Select>
@@ -664,6 +672,13 @@ export default function EventTeamManager() {
                                 A Főszervező automatikusan minden Munkaterülethez és funkcióhoz (Jelentkezések, Naptár) teljes hozzáférést kap, ezzel tehermentesítve téged!
                             </Alert>
                         )}
+
+                        {draftRole === 'MEAL_SCANNER' && (
+                            <Alert severity="success" sx={{ mt: 2, borderRadius: 2, '& .MuiAlert-icon': { color: 'inherit' } }}>
+                                A Pultos csak az ételosztó szkennerhez kap hozzáférést ezen az eseményen. Más szervezői menüpontot nem fog látni.
+                            </Alert>
+                        )}
+
                     </DialogContent>
                     <DialogActions sx={{ p: { xs: 2, sm: 3 }, bgcolor: isDarkMode ? 'rgba(0,0,0,0.2)' : '#f8fafc', borderTop: '1px solid', borderColor: 'divider' }}>
                         <Button onClick={() => setEditModalOpen(false)} color="inherit" disabled={saving} sx={{ fontWeight: 'bold' }}>Mégse</Button>

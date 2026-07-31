@@ -1,10 +1,7 @@
 package com.example.volunteermanagement.service;
 
+import com.example.volunteermanagement.dto.*;
 import com.example.volunteermanagement.tenant.TenantContext;
-import com.example.volunteermanagement.dto.EventDTO;
-import com.example.volunteermanagement.dto.EventQuestionDTO;
-import com.example.volunteermanagement.dto.WorkAreaDTO;
-import com.example.volunteermanagement.dto.OrganizationDTO;
 import com.example.volunteermanagement.model.*;
 import com.example.volunteermanagement.repository.EventRepository;
 import com.example.volunteermanagement.repository.OrganizationRepository;
@@ -23,10 +20,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.hibernate.Hibernate;
 
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Map;
-import java.util.HashMap;
+import java.util.*;
 import java.util.stream.Collectors;
 
 @Service
@@ -674,5 +668,29 @@ public class EventService {
         }
 
         return contacts;
+    }
+
+    @Transactional(readOnly = true)
+    public List<EventScannerOptionDTO> getScannerAllowedEvents(Long currentUserId, boolean isSysAdmin) {
+        List<Event> allowedEvents;
+
+        if (isSysAdmin) {
+            // A globális admin mindent lát, ami még aktív
+            allowedEvents = eventRepository.findAllActiveEvents();
+        } else {
+            // Mik azok a szerepkörök, amikkel ételt oszthat?
+            Set<EventRole> allowedRoles = Set.of(
+                    EventRole.ORGANIZER,
+                    EventRole.COORDINATOR,
+                    EventRole.MEAL_SCANNER
+            );
+            // Lekérdezzük a szigorúan szűrt listát az adatbázisból
+            allowedEvents = eventRepository.findActiveEventsForScanner(currentUserId, allowedRoles);
+        }
+
+        // Entitások átalakítása könnyű DTO-vá a React számára
+        return allowedEvents.stream()
+                .map(event -> new EventScannerOptionDTO(event.getId(), event.getTitle()))
+                .collect(Collectors.toList());
     }
 }
