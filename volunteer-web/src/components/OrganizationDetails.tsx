@@ -352,17 +352,26 @@ export default function OrganizationDetails() {
             </Paper>
 
             {/* --- TABS --- */}
-            <Tabs
-                value={currentTab}
-                onChange={(_e, v) => setCurrentTab(v)}
-                textColor="primary"
-                indicatorColor="primary"
-                sx={{ mb: 3, '& .MuiTab-root': { fontWeight: '900', fontSize: '1rem', textTransform: 'none' } }}
+            <Box
+                sx={{ borderBottom: 1, borderColor: 'divider', mb: 4 }}
+                onTouchStart={(e) => e.stopPropagation()} // A biztonság kedvéért a mobil swipe események miatt
+                onMouseDownCapture={(e) => e.stopPropagation()}
             >
-                <Tab label={`Aktív Események (${activeEvents.length})`} />
-                <Tab label="Rólunk" />
-                <Tab label={`Lezárult Események (${pastEvents.length})`} />
-            </Tabs>
+                <Tabs
+                    value={currentTab}
+                    onChange={(_e, v) => setCurrentTab(v)}
+                    textColor="primary"
+                    indicatorColor="primary"
+                    variant="scrollable" // <--- ETTŐL LESZ GÖRGETHETŐ!
+                    scrollButtons="auto" // <--- ETTŐL LESZNEK NYILAK, HA NEM FÉR KI!
+                    allowScrollButtonsMobile // <--- ETTŐL MOBILON IS MŰKÖDNI FOG!
+                    sx={{ '& .MuiTab-root': { fontWeight: '900', fontSize: '1rem', textTransform: 'none' } }}
+                >
+                    <Tab label={`Aktív Események (${activeEvents.length})`} />
+                    <Tab label="Rólunk" />
+                    <Tab label={`Lezárult Események (${pastEvents.length})`} />
+                </Tabs>
+            </Box>
             <Divider sx={{ mb: 4 }} />
 
             {/* --- TAB TARTALMAK --- */}

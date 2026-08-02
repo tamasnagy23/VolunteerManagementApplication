@@ -7,7 +7,6 @@ import {Box, Button, CssBaseline, Typography} from '@mui/material';
 import ThemeContextProvider from './theme/ThemeContextProvider';
 import LoadingScreen from './components/LoadingScreen';
 import Settings from './components/Settings';
-import MealScanner from './components/MealScanner';
 
 // --- LUSTA BETÖLTÉS (LAZY LOADING) ---
 // Ezek a fájlok csak akkor töltődnek le a felhasználó gépére, amikor rájuk kattint!
@@ -28,6 +27,7 @@ const PublicEventWall = lazy(() => import('./components/PublicEventWall.tsx'));
 const MyApplications = lazy(() => import('./components/MyApplications'));
 const Statistics = lazy(() => import('./components/Statistics.tsx'));
 const OrganizationDetails = lazy(() => import('./components/OrganizationDetails.tsx'));
+const EventCatering = lazy(() => import('./components/EventCatering'));
 
 function App() {
     // Globális inicializációs állapot
@@ -96,7 +96,7 @@ function App() {
                             <Route path="/statistics" element={<Statistics />} />
                             <Route path="/organization/:id" element={<OrganizationDetails />} />
                             <Route path="/settings" element={<Settings />} />
-                            <Route path="/scan-meal" element={<MealScanner />} />
+                            <Route path="/events/:id/catering" element={<EventCatering />} />
                         </Route>
 
                         <Route path="*" element={

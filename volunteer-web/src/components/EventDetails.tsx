@@ -25,16 +25,16 @@ import AddIcon from '@mui/icons-material/Add';
 import PhoneIcon from '@mui/icons-material/Phone';
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import EmailIcon from '@mui/icons-material/Email';
+import RestaurantIcon from '@mui/icons-material/Restaurant';
 
 import api from '../api/axios';
 import axios from 'axios';
 import LoadingScreen from "./LoadingScreen.tsx";
 import { useThemeToggle } from '../theme/ThemeContextProvider';
 
-// --- ÚJ IMPORT: Dokumentumkezelő ---
+// --- Dokumentumkezelő ---
 import EventDocumentsAdmin from '../components/EventDocumentsAdmin';
 import EventDocumentsVolunteer from '../components/EventDocumentsVolunteer';
-import VolunteerQrCode from '../components/VolunteerQrCode'; // vagy ahol létrehoztad
 
 // --- INTERFÉSZEK ---
 interface EventQuestion {
@@ -147,8 +147,6 @@ export default function EventDetails() {
     const [callDialogOpen, setCallDialogOpen] = useState(false);
     const [contactToCall, setContactToCall] = useState<EventContact | null>(null);
 
-    const [userId, setUserId] = useState<number | null>(null);
-
     useEffect(() => {
         if (id) {
             const fetchData = async () => {
@@ -167,7 +165,6 @@ export default function EventDetails() {
                     setContacts(contactsRes.data);
 
                     const activeOrgId = localStorage.getItem('activeOrgId');
-                    setUserId(userRes.data.id);
                     const membership = userRes.data.memberships?.find((m: Membership) => m.orgId === Number(activeOrgId));
                     if (membership) setMembershipStatus(membership.status);
                     if (userRes.data.role === 'SYS_ADMIN') setMembershipStatus('APPROVED');
@@ -472,14 +469,21 @@ export default function EventDetails() {
 
     const sidebarTools = [
         { label: 'Jelentkezők', icon: <FormatListBulletedIcon />, path: `/events/${id}/applications`, color: theme.palette.secondary.main, show: canManageApps },
-        { label: 'Naptár & Beosztás', icon: <CalendarMonthIcon />, path: `/events/${id}/shifts`, color: theme.palette.info.main, show: canManageShifts && permissions?.eventRole !== 'COORDINATOR' }
+        { label: 'Naptár & Beosztás', icon: <CalendarMonthIcon />, path: `/events/${id}/shifts`, color: theme.palette.info.main, show: canManageShifts && permissions?.eventRole !== 'COORDINATOR' },
+        // --- ÚJ: ÉTKEZTETÉS GOMB ---
+        {
+            label: 'Étkeztetés & Catering',
+            icon: <RestaurantIcon />,
+            path: `/events/${id}/catering`,
+            color: theme.palette.warning.main, // Narancssárga szín a gasztronómiához
+            show: permissions?.globalAdmin || permissions?.eventRole === 'ORGANIZER' // Egyelőre csak a főszervezők látják
+        }
     ].filter(tool => tool.show);
 
     return (
         <>
             <Fade in timeout={600}>
                 <Box sx={{ pb: 10 }}>
-                    {/* --- 1. FULL WIDTH BANNER --- */}
                     <Box sx={{
                         width: '100vw', position: 'relative', left: '50%', right: '50%', marginLeft: '-50vw', marginRight: '-50vw',
                         height: { xs: 280, md: 420 }, backgroundColor: isDarkMode ? '#0f172a' : '#e3f2fd',
@@ -504,7 +508,6 @@ export default function EventDetails() {
                         )}
                     </Box>
 
-                    {/* --- 2. HERO CARD WITH ALIGNED BUTTONS --- */}
                     <Container maxWidth="lg" sx={{ mt: -8, position: 'relative', zIndex: 10 }}>
                         <Paper sx={{
                             p: { xs: 3, md: 5 }, borderRadius: 6, backdropFilter: 'blur(25px)', border: '1px solid', borderColor: isDarkMode ? 'rgba(255,255,255,0.1)' : 'rgba(255,255,255,0.5)',
@@ -533,27 +536,22 @@ export default function EventDetails() {
 
                         {error && <Alert severity="error" sx={{ mt: 3, borderRadius: 3 }}>{error}</Alert>}
 
-                        {/* --- KÉT OSZLOPOS ELRENDEZÉS --- */}
                         <Grid container spacing={4} mt={3}>
 
-                            {/* BAL OSZLOP: Információk, Kapcsolatok és Dokumentumok (TABS) */}
+                            {/* BAL OSZLOP */}
                             <Grid size={{ xs: 12, md: 7, lg: 8 }}>
                                 <Box
                                     sx={{ borderBottom: 1, borderColor: isDarkMode ? 'rgba(255,255,255,0.1)' : 'divider', mb: 3 }}
-                                    // --- IDE KERÜL A KÉT ÚJ SOR ---
                                     onTouchStart={(e) => e.stopPropagation()}
                                     onMouseDownCapture={(e) => e.stopPropagation()}
                                 >
                                     <Tabs value={tabIndex} onChange={(_, v) => setTabIndex(v)} textColor="primary" indicatorColor="primary" variant="scrollable" scrollButtons="auto" allowScrollButtonsMobile >
                                         <Tab label="Információk" sx={{ fontWeight: 'bold', fontSize: '1.05rem' }} />
                                         <Tab label="Elérhetőségek" sx={{ fontWeight: 'bold', fontSize: '1.05rem' }} />
-
-                                        {/* --- FRISSÍTVE: Most már mindenki látja ezt a fület! --- */}
                                         <Tab label="Dokumentumok" sx={{ fontWeight: 'bold', fontSize: '1.05rem' }} />
                                     </Tabs>
                                 </Box>
 
-                                {/* 1. FÜL: LEÍRÁS ÉS MUNKATERÜLETEK */}
                                 {tabIndex === 0 && (
                                     <Box>
                                         <Box mb={6}>
@@ -583,7 +581,6 @@ export default function EventDetails() {
                                     </Box>
                                 )}
 
-                                {/* 2. FÜL: ELÉRHETŐSÉGEK */}
                                 {tabIndex === 1 && (
                                     <Box>
                                         <Typography variant="h5" fontWeight="900" sx={{ mb: 3, color: 'text.primary' }}>Szervezők és Koordinátorok</Typography>
@@ -657,17 +654,14 @@ export default function EventDetails() {
                                     </Box>
                                 )}
 
-                                {/* --- 3. FÜL: DOKUMENTUMOK (ELÁGAZÁS SZERVEZŐK ÉS ÖNKÉNTESEK KÖZÖTT) --- */}
                                 {tabIndex === 2 && (
                                     <Box>
                                         {(permissions?.globalAdmin || permissions?.eventRole === 'ORGANIZER') ? (
-                                            // SZERVEZŐI NÉZET
                                             <EventDocumentsAdmin
                                                 eventId={Number(id)}
                                                 tenantId={localStorage.getItem('activeOrgId') || 'default'}
                                             />
                                         ) : (
-                                            // ÖNKÉNTES NÉZET
                                             <EventDocumentsVolunteer
                                                 eventId={Number(id)}
                                                 tenantId={localStorage.getItem('activeOrgId') || 'default'}
@@ -678,25 +672,10 @@ export default function EventDetails() {
 
                             </Grid>
 
-                            {/* JOBB OSZLOP: Oldalsáv */}
+                            {/* JOBB OSZLOP */}
                             <Grid size={{ xs: 12, md: 5, lg: 4 }}>
                                 <Box sx={{ position: 'sticky', top: 100, display: 'flex', flexDirection: 'column', gap: 4 }}>
 
-                                    {/* --- ÚJ: ÉTELKUPON QR KÓD (Csak elfogadott jelentkezés esetén) --- */}
-                                    {userId && myApplications.some(app => app.status === 'APPROVED') && permissions?.eventRole !== 'ORGANIZER' && (
-                                        <Box>
-                                            <Typography variant="subtitle2" fontWeight="900" color="primary" sx={{ textTransform: 'uppercase', mb: 2, ml: 1, letterSpacing: 1 }}>
-                                                🎁 Juttatásaid
-                                            </Typography>
-                                            <VolunteerQrCode
-                                                volunteerId={userId}
-                                                eventId={event.id}
-                                                eventName={event.title}
-                                            />
-                                        </Box>
-                                    )}
-
-                                    {/* 4. MY APPLICATIONS */}
                                     {myApplications.length > 0 && permissions?.eventRole !== 'COORDINATOR' && permissions?.eventRole !== 'ORGANIZER' && (
                                         <Box>
                                             <Typography variant="subtitle2" fontWeight="900" color="info.main" sx={{ textTransform: 'uppercase', mb: 2, ml: 1, letterSpacing: 1 }}>Jelentkezéseid</Typography>
@@ -737,7 +716,6 @@ export default function EventDetails() {
                                         </Box>
                                     )}
 
-                                    {/* 3. PRO QUICK TOOLS */}
                                     {sidebarTools.length > 0 && (
                                         <Box>
                                             <Typography variant="subtitle2" fontWeight="900" color="primary" sx={{ textTransform: 'uppercase', mb: 2, ml: 1, letterSpacing: 1.5 }}>⚙️ Szervezői Eszközök</Typography>
@@ -769,7 +747,6 @@ export default function EventDetails() {
                 </Box>
             </Fade>
 
-            {/* --- JELENTKEZÉSI MODAL --- */}
             <Dialog open={openModal} onClose={() => setOpenModal(false)} maxWidth="sm" fullWidth PaperProps={{ sx: { borderRadius: 5, bgcolor: isDarkMode ? 'rgba(30,41,59,0.98)' : 'white', backdropFilter: 'blur(15px)' } }}>
                 <DialogTitle sx={{ fontWeight: '900', bgcolor: isDarkMode ? '#1e293b' : 'primary.main', color: 'white', py: 3 }}>Esemény Jelentkezés</DialogTitle>
                 <DialogContent sx={{ p: 4 }}>
@@ -844,7 +821,6 @@ export default function EventDetails() {
                 <DialogActions sx={{ p: 2.5 }}><Button onClick={() => setWithdrawModalOpen(false)}>Mégse</Button><Button variant="contained" color="error" onClick={confirmWithdraw} disabled={withdrawing}>Visszavonás</Button></DialogActions>
             </Dialog>
 
-            {/* --- ÚJ: HÍVÁS MEGERŐSÍTŐ MODAL --- */}
             <Dialog open={callDialogOpen} onClose={() => setCallDialogOpen(false)} maxWidth="xs" fullWidth PaperProps={{ sx: { borderRadius: 5, bgcolor: isDarkMode ? 'rgba(30, 41, 59, 0.95)' : 'white', backdropFilter: 'blur(20px)' } }}>
                 <DialogTitle sx={{ fontWeight: '900', color: 'success.main', display: 'flex', alignItems: 'center', gap: 1 }}>
                     <PhoneIcon /> Hívás indítása
@@ -864,7 +840,6 @@ export default function EventDetails() {
                 </DialogActions>
             </Dialog>
 
-            {/* --- ÚJ: SNACKBAR (TOAST) MÁSOLÁSHOZ --- */}
             <Snackbar
                 open={toastOpen}
                 autoHideDuration={5000}

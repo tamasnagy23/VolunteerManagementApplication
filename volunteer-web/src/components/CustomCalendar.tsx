@@ -331,6 +331,7 @@ export default function CustomCalendar({
                     onTouchStart={isMobile && view === 'month' ? onTouchStartEvent : undefined}
                     onTouchMove={isMobile && view === 'month' ? onTouchMoveEvent : undefined}
                     onTouchEnd={isMobile && view === 'month' ? onTouchEndEvent : undefined}
+                    onPointerDownCapture={(e) => e.stopPropagation()}
                     sx={{
                         display: 'flex', flexDirection: 'column', height: '100%', touchAction: 'pan-y',
                         animation: `${slideDirection === 'left' ? 'slideInRight' : 'slideInLeft'} 0.3s cubic-bezier(0.4, 0, 0.2, 1) forwards`,

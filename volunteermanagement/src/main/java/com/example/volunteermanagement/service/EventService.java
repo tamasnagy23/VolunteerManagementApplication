@@ -20,6 +20,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.hibernate.Hibernate;
 
+import java.time.LocalTime;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -81,6 +82,14 @@ public class EventService {
                 .applicationDeadline(dto.applicationDeadline())
                 .isRegistrationOpen(dto.isRegistrationOpen() != null ? dto.isRegistrationOpen() : true)
                 .organization(org)
+                // --- ÚJ: ÉTKEZÉSI IDŐSÁVOK BEKÖTÉSE ---
+                .breakfastStartTime(dto.breakfastStartTime())
+                .breakfastEndTime(dto.breakfastEndTime())
+                .lunchStartTime(dto.lunchStartTime())
+                .lunchEndTime(dto.lunchEndTime())
+                .dinnerStartTime(dto.dinnerStartTime())
+                .dinnerEndTime(dto.dinnerEndTime())
+                // -------------------------------------
                 .build();
 
         if (dto.workAreas() != null) {
@@ -89,7 +98,6 @@ public class EventService {
                         .name(waDto.name())
                         .description(waDto.description())
                         .capacity(waDto.capacity())
-                        // --- ÚJ: Étkezési keret mentése ---
                         .mealsPerShift(waDto.mealsPerShift() != null ? waDto.mealsPerShift() : 0)
                         .event(event).build());
             }
@@ -99,7 +107,7 @@ public class EventService {
             for (EventQuestionDTO qDto : dto.questions()) {
                 event.getQuestions().add(EventQuestion.builder()
                         .questionText(qDto.questionText()).questionType(qDto.questionType())
-                        .purpose(qDto.purpose()!= null ? qDto.purpose() : com.example.volunteermanagement.model.QuestionPurpose.GENERAL)
+                        .purpose(qDto.purpose() != null ? qDto.purpose() : com.example.volunteermanagement.model.QuestionPurpose.GENERAL)
                         .options(qDto.options()).isRequired(qDto.isRequired()).event(event).build());
             }
         }
@@ -171,6 +179,11 @@ public class EventService {
                         event.getApplicationDeadline(),
                         event.isRegistrationOpen(),
                         event.getBannerUrl(),
+                        // --- ÚJ IDŐSÁVOK ---
+                        event.getBreakfastStartTime(), event.getBreakfastEndTime(),
+                        event.getLunchStartTime(), event.getLunchEndTime(),
+                        event.getDinnerStartTime(), event.getDinnerEndTime(),
+                        // -------------------
                         List.of(),
                         List.of(),
                         org != null ? new OrganizationDTO(
@@ -205,6 +218,11 @@ public class EventService {
                         event.getApplicationDeadline(),
                         event.isRegistrationOpen(),
                         event.getBannerUrl(),
+                        // --- ÚJ IDŐSÁVOK ---
+                        event.getBreakfastStartTime(), event.getBreakfastEndTime(),
+                        event.getLunchStartTime(), event.getLunchEndTime(),
+                        event.getDinnerStartTime(), event.getDinnerEndTime(),
+                        // -------------------
                         List.of(),
                         List.of(),
                         org != null ? new OrganizationDTO(
@@ -288,6 +306,15 @@ public class EventService {
             event.setRegistrationOpen(dto.isRegistrationOpen());
         }
 
+        // --- ÚJ: ÉTKEZÉSI IDŐSÁVOK FRISSÍTÉSE ---
+        event.setBreakfastStartTime(dto.breakfastStartTime());
+        event.setBreakfastEndTime(dto.breakfastEndTime());
+        event.setLunchStartTime(dto.lunchStartTime());
+        event.setLunchEndTime(dto.lunchEndTime());
+        event.setDinnerStartTime(dto.dinnerStartTime());
+        event.setDinnerEndTime(dto.dinnerEndTime());
+        // ----------------------------------------
+
         if (dto.workAreas() != null) {
             List<Long> incomingWaIds = dto.workAreas().stream().filter(w -> w.id() != null).map(WorkAreaDTO::id).collect(Collectors.toList());
             event.getWorkAreas().removeIf(existingWa -> !incomingWaIds.contains(existingWa.getId()));
@@ -299,7 +326,6 @@ public class EventService {
                                 existingWa.setName(waDto.name());
                                 existingWa.setDescription(waDto.description());
                                 existingWa.setCapacity(waDto.capacity());
-                                // --- ÚJ: Étkezési keret frissítése ---
                                 existingWa.setMealsPerShift(waDto.mealsPerShift() != null ? waDto.mealsPerShift() : 0);
                             });
                 } else {
@@ -307,7 +333,6 @@ public class EventService {
                             .name(waDto.name())
                             .description(waDto.description())
                             .capacity(waDto.capacity())
-                            // --- ÚJ: Étkezési keret új területnél ---
                             .mealsPerShift(waDto.mealsPerShift() != null ? waDto.mealsPerShift() : 0)
                             .event(event).build());
                 }
@@ -331,7 +356,7 @@ public class EventService {
                                 existingQ.setRequired(qDto.isRequired());
                             });
                 } else {
-                    event.getQuestions().add(EventQuestion.builder().questionText(qDto.questionText()).questionType(qDto.questionType()).purpose(qDto.purpose()!= null ? qDto.purpose() : com.example.volunteermanagement.model.QuestionPurpose.GENERAL).options(qDto.options()).isRequired(qDto.isRequired()).event(event).build());
+                    event.getQuestions().add(EventQuestion.builder().questionText(qDto.questionText()).questionType(qDto.questionType()).purpose(qDto.purpose() != null ? qDto.purpose() : com.example.volunteermanagement.model.QuestionPurpose.GENERAL).options(qDto.options()).isRequired(qDto.isRequired()).event(event).build());
                 }
             }
         } else {
@@ -364,7 +389,11 @@ public class EventService {
                 event.getStartTime(), event.getEndTime(),
                 event.getApplicationDeadline(), event.isRegistrationOpen(),
                 event.getBannerUrl(),
-                // --- ÚJ: mealsPerShift és coordinatorIds beemelése a DTO-ba ---
+                // --- ÚJ IDŐSÁVOK A DTO-BAN ---
+                event.getBreakfastStartTime(), event.getBreakfastEndTime(),
+                event.getLunchStartTime(), event.getLunchEndTime(),
+                event.getDinnerStartTime(), event.getDinnerEndTime(),
+                // -----------------------------
                 event.getWorkAreas().stream().map(wa -> new WorkAreaDTO(
                         wa.getId(), wa.getName(), wa.getDescription(), wa.getCapacity(),
                         wa.getMealsPerShift() != null ? wa.getMealsPerShift() : 0,
@@ -381,13 +410,17 @@ public class EventService {
                 event.getStartTime(), event.getEndTime(),
                 event.getApplicationDeadline(), event.isRegistrationOpen(),
                 event.getBannerUrl(),
-                // --- ÚJ: mealsPerShift és coordinatorIds beemelése a DTO-ba ---
+                // --- ÚJ IDŐSÁVOK A DTO-BAN ---
+                event.getBreakfastStartTime(), event.getBreakfastEndTime(),
+                event.getLunchStartTime(), event.getLunchEndTime(),
+                event.getDinnerStartTime(), event.getDinnerEndTime(),
+                // -----------------------------
                 event.getWorkAreas().stream().map(wa -> new WorkAreaDTO(
                         wa.getId(), wa.getName(), wa.getDescription(), wa.getCapacity(),
                         wa.getMealsPerShift() != null ? wa.getMealsPerShift() : 0,
                         List.of()
                 )).toList(),
-                event.getQuestions().stream().map(q -> new EventQuestionDTO(q.getId(), q.getQuestionText(), q.getQuestionType(),q.getPurpose(), q.getOptions(), q.isRequired())).toList(),
+                event.getQuestions().stream().map(q -> new EventQuestionDTO(q.getId(), q.getQuestionText(), q.getQuestionType(), q.getPurpose(), q.getOptions(), q.isRequired())).toList(),
                 new OrganizationDTO(org.getId(), org.getName(), org.getTenantId(), org.getAddress(), org.getDescription(), org.getEmail(), org.getPhone(), org.getLogoUrl(), org.getBannerUrl(), org.getCui())
         );
     }
@@ -417,7 +450,6 @@ public class EventService {
         Event event = eventRepository.findById(eventId)
                 .orElseThrow(() -> new RuntimeException("Esemény nem található!"));
         return event.getWorkAreas().stream()
-                // --- ÚJ: mealsPerShift és coordinatorIds beemelése a DTO-ba ---
                 .map(wa -> new WorkAreaDTO(
                         wa.getId(), wa.getName(), wa.getDescription(), wa.getCapacity(),
                         wa.getMealsPerShift() != null ? wa.getMealsPerShift() : 0,
@@ -428,7 +460,8 @@ public class EventService {
 
     private void syncEventToMaster(Event event, Long orgId) {
         try (java.sql.Connection conn = java.sql.DriverManager.getConnection("jdbc:postgresql://localhost:5432/master_db", "postgres", "jelszo")) {
-            String sql = "INSERT INTO events (id, title, description, location, start_time, end_time, application_deadline, is_registration_open, organization_id, banner_url) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+            // JAVÍTOTT SQL (16 oszlop összesen)
+            String sql = "INSERT INTO events (id, title, description, location, start_time, end_time, application_deadline, is_registration_open, organization_id, banner_url, breakfast_start_time, breakfast_end_time, lunch_start_time, lunch_end_time, dinner_start_time, dinner_end_time) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
             try (java.sql.PreparedStatement ps = conn.prepareStatement(sql)) {
                 ps.setLong(1, event.getId());
                 ps.setString(2, event.getTitle());
@@ -452,6 +485,25 @@ public class EventService {
                     ps.setNull(10, java.sql.Types.VARCHAR);
                 }
 
+                // --- ÚJ IDŐSÁVOK MENTÉSE ---
+                if (event.getBreakfastStartTime() != null) ps.setTime(11, java.sql.Time.valueOf(event.getBreakfastStartTime()));
+                else ps.setNull(11, java.sql.Types.TIME);
+
+                if (event.getBreakfastEndTime() != null) ps.setTime(12, java.sql.Time.valueOf(event.getBreakfastEndTime()));
+                else ps.setNull(12, java.sql.Types.TIME);
+
+                if (event.getLunchStartTime() != null) ps.setTime(13, java.sql.Time.valueOf(event.getLunchStartTime()));
+                else ps.setNull(13, java.sql.Types.TIME);
+
+                if (event.getLunchEndTime() != null) ps.setTime(14, java.sql.Time.valueOf(event.getLunchEndTime()));
+                else ps.setNull(14, java.sql.Types.TIME);
+
+                if (event.getDinnerStartTime() != null) ps.setTime(15, java.sql.Time.valueOf(event.getDinnerStartTime()));
+                else ps.setNull(15, java.sql.Types.TIME);
+
+                if (event.getDinnerEndTime() != null) ps.setTime(16, java.sql.Time.valueOf(event.getDinnerEndTime()));
+                else ps.setNull(16, java.sql.Types.TIME);
+
                 ps.executeUpdate();
                 System.out.println("✅ Esemény (Kirakat) sikeresen átmásolva a Mester DB-be!");
             }
@@ -462,7 +514,8 @@ public class EventService {
 
     public void updateEventInMaster(Event event) {
         try (java.sql.Connection conn = java.sql.DriverManager.getConnection("jdbc:postgresql://localhost:5432/master_db", "postgres", "jelszo")) {
-            String sql = "UPDATE events SET title=?, description=?, location=?, start_time=?, end_time=?, application_deadline=?, is_registration_open=?, banner_url=? WHERE id=?";
+            // JAVÍTOTT SQL: hozzáadtuk az Update részhez is
+            String sql = "UPDATE events SET title=?, description=?, location=?, start_time=?, end_time=?, application_deadline=?, is_registration_open=?, banner_url=?, breakfast_start_time=?, breakfast_end_time=?, lunch_start_time=?, lunch_end_time=?, dinner_start_time=?, dinner_end_time=? WHERE id=?";
             try (java.sql.PreparedStatement ps = conn.prepareStatement(sql)) {
                 ps.setString(1, event.getTitle());
                 ps.setString(2, event.getDescription());
@@ -484,7 +537,27 @@ public class EventService {
                     ps.setNull(8, java.sql.Types.VARCHAR);
                 }
 
-                ps.setLong(9, event.getId());
+                // --- ÚJ IDŐSÁVOK FRISSÍTÉSE ---
+                if (event.getBreakfastStartTime() != null) ps.setTime(9, java.sql.Time.valueOf(event.getBreakfastStartTime()));
+                else ps.setNull(9, java.sql.Types.TIME);
+
+                if (event.getBreakfastEndTime() != null) ps.setTime(10, java.sql.Time.valueOf(event.getBreakfastEndTime()));
+                else ps.setNull(10, java.sql.Types.TIME);
+
+                if (event.getLunchStartTime() != null) ps.setTime(11, java.sql.Time.valueOf(event.getLunchStartTime()));
+                else ps.setNull(11, java.sql.Types.TIME);
+
+                if (event.getLunchEndTime() != null) ps.setTime(12, java.sql.Time.valueOf(event.getLunchEndTime()));
+                else ps.setNull(12, java.sql.Types.TIME);
+
+                if (event.getDinnerStartTime() != null) ps.setTime(13, java.sql.Time.valueOf(event.getDinnerStartTime()));
+                else ps.setNull(13, java.sql.Types.TIME);
+
+                if (event.getDinnerEndTime() != null) ps.setTime(14, java.sql.Time.valueOf(event.getDinnerEndTime()));
+                else ps.setNull(14, java.sql.Types.TIME);
+
+                // Az ID megy az utolsó (15.) helyre
+                ps.setLong(15, event.getId());
 
                 ps.executeUpdate();
                 System.out.println("✅ Esemény (Kirakat) sikeresen frissítve a Mester DB-ben!");
@@ -518,13 +591,17 @@ public class EventService {
 
         try (java.sql.Connection conn = java.sql.DriverManager.getConnection("jdbc:postgresql://localhost:5432/master_db", "postgres", "jelszo")) {
 
-            String sql = "INSERT INTO events (id, title, description, location, start_time, end_time, application_deadline, is_registration_open, organization_id, banner_url) " +
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) " +
+            // JAVÍTOTT UPSERT SQL: Mind a 16 oszlop benne van az INSERT-ben és az UPDATE-ben is
+            String sql = "INSERT INTO events (id, title, description, location, start_time, end_time, application_deadline, is_registration_open, organization_id, banner_url, breakfast_start_time, breakfast_end_time, lunch_start_time, lunch_end_time, dinner_start_time, dinner_end_time) " +
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) " +
                     "ON CONFLICT (id) DO UPDATE SET " +
                     "title = EXCLUDED.title, description = EXCLUDED.description, location = EXCLUDED.location, " +
                     "start_time = EXCLUDED.start_time, end_time = EXCLUDED.end_time, " +
                     "application_deadline = EXCLUDED.application_deadline, is_registration_open = EXCLUDED.is_registration_open, " +
-                    "organization_id = EXCLUDED.organization_id, banner_url = EXCLUDED.banner_url";
+                    "organization_id = EXCLUDED.organization_id, banner_url = EXCLUDED.banner_url, " +
+                    "breakfast_start_time = EXCLUDED.breakfast_start_time, breakfast_end_time = EXCLUDED.breakfast_end_time, " +
+                    "lunch_start_time = EXCLUDED.lunch_start_time, lunch_end_time = EXCLUDED.lunch_end_time, " +
+                    "dinner_start_time = EXCLUDED.dinner_start_time, dinner_end_time = EXCLUDED.dinner_end_time";
 
             for (Organization org : orgs) {
                 if (org.getTenantId() != null && !org.getTenantId().trim().isEmpty()) {
@@ -555,6 +632,25 @@ public class EventService {
                             } else {
                                 ps.setNull(10, java.sql.Types.VARCHAR);
                             }
+
+                            // --- ÚJ IDŐSÁVOK MENTÉSE (11-16) ---
+                            if (event.getBreakfastStartTime() != null) ps.setTime(11, java.sql.Time.valueOf(event.getBreakfastStartTime()));
+                            else ps.setNull(11, java.sql.Types.TIME);
+
+                            if (event.getBreakfastEndTime() != null) ps.setTime(12, java.sql.Time.valueOf(event.getBreakfastEndTime()));
+                            else ps.setNull(12, java.sql.Types.TIME);
+
+                            if (event.getLunchStartTime() != null) ps.setTime(13, java.sql.Time.valueOf(event.getLunchStartTime()));
+                            else ps.setNull(13, java.sql.Types.TIME);
+
+                            if (event.getLunchEndTime() != null) ps.setTime(14, java.sql.Time.valueOf(event.getLunchEndTime()));
+                            else ps.setNull(14, java.sql.Types.TIME);
+
+                            if (event.getDinnerStartTime() != null) ps.setTime(15, java.sql.Time.valueOf(event.getDinnerStartTime()));
+                            else ps.setNull(15, java.sql.Types.TIME);
+
+                            if (event.getDinnerEndTime() != null) ps.setTime(16, java.sql.Time.valueOf(event.getDinnerEndTime()));
+                            else ps.setNull(16, java.sql.Types.TIME);
 
                             ps.executeUpdate();
                             syncedCount++;
@@ -675,20 +771,16 @@ public class EventService {
         List<Event> allowedEvents;
 
         if (isSysAdmin) {
-            // A globális admin mindent lát, ami még aktív
             allowedEvents = eventRepository.findAllActiveEvents();
         } else {
-            // Mik azok a szerepkörök, amikkel ételt oszthat?
             Set<EventRole> allowedRoles = Set.of(
                     EventRole.ORGANIZER,
                     EventRole.COORDINATOR,
                     EventRole.MEAL_SCANNER
             );
-            // Lekérdezzük a szigorúan szűrt listát az adatbázisból
             allowedEvents = eventRepository.findActiveEventsForScanner(currentUserId, allowedRoles);
         }
 
-        // Entitások átalakítása könnyű DTO-vá a React számára
         return allowedEvents.stream()
                 .map(event -> new EventScannerOptionDTO(event.getId(), event.getTitle()))
                 .collect(Collectors.toList());

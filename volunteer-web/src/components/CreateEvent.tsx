@@ -15,7 +15,6 @@ import CheckIcon from '@mui/icons-material/Check';
 import CloseIcon from '@mui/icons-material/Close';
 import PhotoCameraIcon from '@mui/icons-material/PhotoCamera';
 
-// --- PROFI NAPTÁR IMPORTOK ---
 import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
@@ -29,7 +28,6 @@ import { useNavigate, useLocation, useParams } from 'react-router-dom';
 import axios from 'axios';
 import LoadingScreen from "./LoadingScreen.tsx";
 
-// --- INTERFÉSZEK ---
 interface WorkAreaInput {
     id?: number;
     name: string;
@@ -43,7 +41,7 @@ interface EventQuestionInput {
     id?: number;
     questionText: string;
     questionType: 'TEXT' | 'DROPDOWN' | 'CHECKBOX';
-    purpose: QuestionPurpose; // <-- ÚJ MEZŐ
+    purpose: QuestionPurpose;
     options: string;
     isRequired: boolean;
 }
@@ -76,7 +74,21 @@ const combineDateAndTime = (date: Date | null, time: Date | null): string | null
     return `${result.getFullYear()}-${pad(result.getMonth() + 1)}-${pad(result.getDate())}T${pad(result.getHours())}:${pad(result.getMinutes())}:00`;
 };
 
-// --- NAPTÁR MAGYARÍTÁS ---
+// --- ÚJ: Helper a HH:mm formátum konvertálásához ---
+const parseLocalTime = (timeStr: string | null): Date | null => {
+    if (!timeStr) return null;
+    const [h, m] = timeStr.split(':');
+    const d = new Date();
+    d.setHours(Number(h), Number(m), 0, 0);
+    return d;
+};
+
+const formatLocalTime = (date: Date | null): string | null => {
+    if (!date) return null;
+    const pad = (n: number) => String(n).padStart(2, '0');
+    return `${pad(date.getHours())}:${pad(date.getMinutes())}`;
+};
+
 const huLocaleText = {
     cancelButtonLabel: 'Mégse',
     okButtonLabel: 'Rendben',
@@ -116,13 +128,27 @@ export default function EventForm() {
 
     const [startDate, setStartDate] = useState<Date | null>(new Date());
     const [startTime, setStartTime] = useState<Date | null>(new Date());
-
     const [endDate, setEndDate] = useState<Date | null>(new Date());
     const [endTime, setEndTime] = useState<Date | null>(new Date());
-
     const [deadlineDate, setDeadlineDate] = useState<Date | null>(null);
     const [deadlineTime, setDeadlineTime] = useState<Date | null>(null);
     const [isRegistrationOpen, setIsRegistrationOpen] = useState(true);
+
+    // --- ÚJ: Étkezési idősávok állapotai ---
+    const [breakfastStart, setBreakfastStart] = useState<Date | null>(null);
+    const [breakfastEnd, setBreakfastEnd] = useState<Date | null>(null);
+    const [lunchStart, setLunchStart] = useState<Date | null>(null);
+    const [lunchEnd, setLunchEnd] = useState<Date | null>(null);
+    const [dinnerStart, setDinnerStart] = useState<Date | null>(null);
+    const [dinnerEnd, setDinnerEnd] = useState<Date | null>(null);
+
+    // --- ÚJ: Étkezési idősávok ablak-vezérlői ---
+    const [openBreakfastStart, setOpenBreakfastStart] = useState(false);
+    const [openBreakfastEnd, setOpenBreakfastEnd] = useState(false);
+    const [openLunchStart, setOpenLunchStart] = useState(false);
+    const [openLunchEnd, setOpenLunchEnd] = useState(false);
+    const [openDinnerStart, setOpenDinnerStart] = useState(false);
+    const [openDinnerEnd, setOpenDinnerEnd] = useState(false);
 
     const [openStartDate, setOpenStartDate] = useState(false);
     const [openStartTime, setOpenStartTime] = useState(false);
@@ -177,6 +203,14 @@ export default function EventForm() {
                         setIsRegistrationOpen(data.isRegistrationOpen);
                     }
 
+                    // --- ÚJ: Étkezési idősávok betöltése ---
+                    setBreakfastStart(parseLocalTime(data.breakfastStartTime));
+                    setBreakfastEnd(parseLocalTime(data.breakfastEndTime));
+                    setLunchStart(parseLocalTime(data.lunchStartTime));
+                    setLunchEnd(parseLocalTime(data.lunchEndTime));
+                    setDinnerStart(parseLocalTime(data.dinnerStartTime));
+                    setDinnerEnd(parseLocalTime(data.dinnerEndTime));
+
                     if (data.workAreas) {
                         setWorkAreas(data.workAreas.map((wa: WorkAreaInput) => ({
                             id: wa.id, name: wa.name, description: wa.description || '', capacity: wa.capacity || 0
@@ -188,7 +222,7 @@ export default function EventForm() {
                             id: q.id,
                             questionText: q.questionText,
                             questionType: q.questionType,
-                            purpose: q.purpose || 'GENERAL', // <-- ÚJ MEZŐ BETÖLTÉSE
+                            purpose: q.purpose || 'GENERAL',
                             options: q.options || '',
                             isRequired: q.isRequired
                         })));
@@ -275,7 +309,6 @@ export default function EventForm() {
     const addArea = () => setWorkAreas([...workAreas, { name: '', description: '', capacity: 5 }]);
     const removeArea = (index: number) => setWorkAreas(workAreas.filter((_, i) => i !== index));
 
-    // --- ÚJ: Funkció választható opciók ---
     const purposeOptions = [
         { value: 'GENERAL', label: 'Általános kérdés (Nincs extra funkció)' },
         { value: 'DIETARY_PREFERENCE', label: 'Étkezési igény (QR Büfé modulhoz)' },
@@ -289,7 +322,6 @@ export default function EventForm() {
         setQuestions(newQuestions);
     };
 
-    // --- ÚJ: Okos kitöltő logika ---
     const handlePurposeChange = (index: number, newPurpose: QuestionPurpose) => {
         const newQuestions = [...questions];
         const q = newQuestions[index];
@@ -310,7 +342,6 @@ export default function EventForm() {
         setQuestions(newQuestions);
     };
 
-    // --- MÓDOSÍTOTT: Alapértelmezetten GENERAL-al hozza létre ---
     const addQuestion = () => setQuestions([...questions, { questionText: '', questionType: 'TEXT', purpose: 'GENERAL', options: '', isRequired: false }]);
     const removeQuestion = (index: number) => setQuestions(questions.filter((_, i) => i !== index));
 
@@ -331,7 +362,6 @@ export default function EventForm() {
         if (!isEditMode || !id) return true;
         try {
             const shiftsRes = await api.get(`/events/${id}/shifts`);
-
             const shifts: ShiftData[] = shiftsRes.data.filter((s: ShiftData) => s.type !== 'PERSONAL');
 
             const newEventStart = new Date(finalStart).getTime();
@@ -393,6 +423,15 @@ export default function EventForm() {
             endTime: finalEndISO,
             applicationDeadline: finalDeadlineISO,
             isRegistrationOpen: isRegistrationOpen,
+
+            // --- ÚJ: Étkezési idősávok formázása és beküldése ---
+            breakfastStartTime: formatLocalTime(breakfastStart),
+            breakfastEndTime: formatLocalTime(breakfastEnd),
+            lunchStartTime: formatLocalTime(lunchStart),
+            lunchEndTime: formatLocalTime(lunchEnd),
+            dinnerStartTime: formatLocalTime(dinnerStart),
+            dinnerEndTime: formatLocalTime(dinnerEnd),
+
             workAreas: workAreas,
             questions: questions,
             organization: (user?.role === 'SYS_ADMIN' && selectedAdminOrgId !== '')
@@ -421,11 +460,10 @@ export default function EventForm() {
                 }
             }
 
-            // JAVÍTÁS: Itt kezeljük okosan a navigációt!
             if (isEditMode) {
-                navigate(-1); // Visszalépünk a history-ban az Adatlapra
+                navigate(-1);
             } else {
-                navigate(`/events/${createdEventId}`, { replace: true }); // Felülírjuk az űrlapot a history-ban
+                navigate(`/events/${createdEventId}`, { replace: true });
             }
 
         } catch (err: unknown) {
@@ -677,6 +715,86 @@ export default function EventForm() {
                                                     </Paper>
                                                 </Grid>
                                             </Grid>
+
+                                            {/* ============================================== */}
+                                            {/* ÚJ: ÉTKEZÉSI IDŐSÁVOK BEÁLLÍTÁSA A SZERVEZŐKNEK  */}
+                                            {/* ============================================== */}
+                                            <Divider sx={{ my: 4, borderColor: isDarkMode ? 'rgba(255,255,255,0.1)' : 'divider' }} />
+
+                                            <Typography variant="subtitle1" color="primary" sx={{ mb: 2, fontWeight: '800', textTransform: 'uppercase' }}>
+                                                Étkezési Idősávok (Opcionális)
+                                            </Typography>
+
+                                            <Alert severity="info" sx={{ mb: 3, borderRadius: 2, bgcolor: isDarkMode ? 'rgba(59, 130, 246, 0.1)' : 'auto', color: isDarkMode ? '#93c5fd' : 'auto' }}>
+                                                Állítsd be, mettől meddig aktívak az egyes étkezések. Ezen az idősávon kívül a pultos szkenner automatikusan letiltja az étel kiadását! (Ha üresen hagyod, bármikor kiadható).
+                                            </Alert>
+
+                                            <Grid container spacing={4}>
+                                                <Grid size={{ xs: 12, md: 4 }}>
+                                                    <Paper sx={{ p: 2, borderRadius: 2, border: '1px solid', borderColor: isDarkMode ? 'rgba(255,255,255,0.1)' : 'divider', bgcolor: isDarkMode ? 'rgba(0,0,0,0.1)' : 'auto' }}>
+                                                        <Typography fontWeight="bold" sx={{ mb: 2, color: 'text.primary', display: 'flex', alignItems: 'center', gap: 1 }}>
+                                                            🥐 Reggeli
+                                                        </Typography>
+                                                        <Box display="flex" flexDirection="column" gap={2}>
+                                                            <TimePicker
+                                                                label="Kezdés" value={breakfastStart} onChange={setBreakfastStart} ampm={false}
+                                                                open={openBreakfastStart} onClose={() => setOpenBreakfastStart(false)} onOpen={() => setOpenBreakfastStart(true)}
+                                                                viewRenderers={{ hours: renderTimeViewClock, minutes: renderTimeViewClock }}
+                                                                slotProps={{ textField: { size: 'small', onClick: () => setOpenBreakfastStart(true) } }}
+                                                            />
+                                                            <TimePicker
+                                                                label="Vége" value={breakfastEnd} onChange={setBreakfastEnd} ampm={false}
+                                                                open={openBreakfastEnd} onClose={() => setOpenBreakfastEnd(false)} onOpen={() => setOpenBreakfastEnd(true)}
+                                                                viewRenderers={{ hours: renderTimeViewClock, minutes: renderTimeViewClock }}
+                                                                slotProps={{ textField: { size: 'small', onClick: () => setOpenBreakfastEnd(true) } }}
+                                                            />
+                                                        </Box>
+                                                    </Paper>
+                                                </Grid>
+                                                <Grid size={{ xs: 12, md: 4 }}>
+                                                    <Paper sx={{ p: 2, borderRadius: 2, border: '1px solid', borderColor: isDarkMode ? 'rgba(255,255,255,0.1)' : 'divider', bgcolor: isDarkMode ? 'rgba(0,0,0,0.1)' : 'auto' }}>
+                                                        <Typography fontWeight="bold" sx={{ mb: 2, color: 'text.primary', display: 'flex', alignItems: 'center', gap: 1 }}>
+                                                            🍲 Ebéd
+                                                        </Typography>
+                                                        <Box display="flex" flexDirection="column" gap={2}>
+                                                            <TimePicker
+                                                                label="Kezdés" value={lunchStart} onChange={setLunchStart} ampm={false}
+                                                                open={openLunchStart} onClose={() => setOpenLunchStart(false)} onOpen={() => setOpenLunchStart(true)}
+                                                                viewRenderers={{ hours: renderTimeViewClock, minutes: renderTimeViewClock }}
+                                                                slotProps={{ textField: { size: 'small', onClick: () => setOpenLunchStart(true) } }}
+                                                            />
+                                                            <TimePicker
+                                                                label="Vége" value={lunchEnd} onChange={setLunchEnd} ampm={false}
+                                                                open={openLunchEnd} onClose={() => setOpenLunchEnd(false)} onOpen={() => setOpenLunchEnd(true)}
+                                                                viewRenderers={{ hours: renderTimeViewClock, minutes: renderTimeViewClock }}
+                                                                slotProps={{ textField: { size: 'small', onClick: () => setOpenLunchEnd(true) } }}
+                                                            />
+                                                        </Box>
+                                                    </Paper>
+                                                </Grid>
+                                                <Grid size={{ xs: 12, md: 4 }}>
+                                                    <Paper sx={{ p: 2, borderRadius: 2, border: '1px solid', borderColor: isDarkMode ? 'rgba(255,255,255,0.1)' : 'divider', bgcolor: isDarkMode ? 'rgba(0,0,0,0.1)' : 'auto' }}>
+                                                        <Typography fontWeight="bold" sx={{ mb: 2, color: 'text.primary', display: 'flex', alignItems: 'center', gap: 1 }}>
+                                                            🍕 Vacsora
+                                                        </Typography>
+                                                        <Box display="flex" flexDirection="column" gap={2}>
+                                                            <TimePicker
+                                                                label="Kezdés" value={dinnerStart} onChange={setDinnerStart} ampm={false}
+                                                                open={openDinnerStart} onClose={() => setOpenDinnerStart(false)} onOpen={() => setOpenDinnerStart(true)}
+                                                                viewRenderers={{ hours: renderTimeViewClock, minutes: renderTimeViewClock }}
+                                                                slotProps={{ textField: { size: 'small', onClick: () => setOpenDinnerStart(true) } }}
+                                                            />
+                                                            <TimePicker
+                                                                label="Vége" value={dinnerEnd} onChange={setDinnerEnd} ampm={false}
+                                                                open={openDinnerEnd} onClose={() => setOpenDinnerEnd(false)} onOpen={() => setOpenDinnerEnd(true)}
+                                                                viewRenderers={{ hours: renderTimeViewClock, minutes: renderTimeViewClock }}
+                                                                slotProps={{ textField: { size: 'small', onClick: () => setOpenDinnerEnd(true) } }}
+                                                            />
+                                                        </Box>
+                                                    </Paper>
+                                                </Grid>
+                                            </Grid>
+
                                         </LocalizationProvider>
                                     </Grid>
                                 </Grid>
@@ -796,7 +914,6 @@ export default function EventForm() {
 
                                         <Grid container spacing={2} sx={{ pr: { xs: 0, md: 4 }, mt: { xs: 3, md: 0 }, alignItems: 'center' }}>
 
-                                            {/* 1. Kérdés Funkciója (Purpose) */}
                                             <Grid size={{ xs: 12, md: 4 }}>
                                                 <FormControl fullWidth size="small">
                                                     <InputLabel>Rendszerfunkció (Opcionális)</InputLabel>
@@ -819,12 +936,10 @@ export default function EventForm() {
                                                 </FormControl>
                                             </Grid>
 
-                                            {/* 2. Kérdés Szövege */}
                                             <Grid size={{ xs: 12, md: 5 }}>
                                                 <TextField label="Kérdés szövege" fullWidth size="small" value={q.questionText} onChange={(e) => handleQuestionChange(index, 'questionText', e.target.value)} required />
                                             </Grid>
 
-                                            {/* 3. Típus */}
                                             <Grid size={{ xs: 12, md: 3 }}>
                                                 <FormControl fullWidth size="small">
                                                     <InputLabel>Válasz Típusa</InputLabel>
@@ -836,7 +951,6 @@ export default function EventForm() {
                                                 </FormControl>
                                             </Grid>
 
-                                            {/* Második sor: Kötelező kapcsoló és Válaszlehetőségek */}
                                             <Grid size={{ xs: 12, md: 3 }} sx={{ display: 'flex', alignItems: 'center', mt: 1 }}>
                                                 <FormControlLabel control={<Checkbox checked={q.isRequired} onChange={(e) => handleQuestionChange(index, 'isRequired', e.target.checked)} color="primary" />} label="Kötelező kitölteni" />
                                             </Grid>
@@ -872,7 +986,6 @@ export default function EventForm() {
                                     {loading ? 'Folyamatban...' : isEditMode ? 'Változtatások Mentése' : 'Esemény Publikálása'}
                                 </Button>
 
-                                {/* JAVÍTÁS: A Mégse gomb is visszadob a memóriában szerkesztés esetén */}
                                 <Button
                                     variant="outlined" size="large" onClick={() => isEditMode ? navigate(-1) : navigate('/dashboard', { replace: true })}
                                     sx={{

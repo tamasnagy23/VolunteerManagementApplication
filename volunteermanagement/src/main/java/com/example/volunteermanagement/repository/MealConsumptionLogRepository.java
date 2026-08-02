@@ -8,6 +8,8 @@ import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
 import java.time.LocalDateTime;
+import java.util.List;
+import java.util.Optional;
 
 @Repository
 public interface MealConsumptionLogRepository extends JpaRepository<MealConsumptionLog, Long> {
@@ -28,4 +30,15 @@ public interface MealConsumptionLogRepository extends JpaRepository<MealConsumpt
             @Param("startOfDay") LocalDateTime startOfDay,
             @Param("endOfDay") LocalDateTime endOfDay
     );
+
+    // Megkeresi a mai nap legutóbbi fogyasztását egy adott ételtípusból
+    Optional<MealConsumptionLog> findFirstByVolunteerIdAndEventIdAndMealTypeAndConsumedAtBetweenOrderByConsumedAtDesc(
+            Long volunteerId, Long eventId, MealType mealType, LocalDateTime startOfDay, LocalDateTime endOfDay
+    );
+
+    // =========================================================================
+    // --- ÚJ METÓDUS A CATERING DASHBOARDHOZ ---
+    // =========================================================================
+    // Lekéri az adott nap összes ételkiadását az eseményen (a statisztikához és a listához)
+    List<MealConsumptionLog> findByEventIdAndConsumedAtBetween(Long eventId, LocalDateTime startOfDay, LocalDateTime endOfDay);
 }

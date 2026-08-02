@@ -6,6 +6,7 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
 import java.time.LocalDateTime;
+import java.time.LocalTime; // <-- ÚJ IMPORT
 import java.util.List;
 
 public record EventDTO(
@@ -34,7 +35,18 @@ public record EventDTO(
 
         Boolean isRegistrationOpen,
 
-        String bannerUrl, // <--- ÚJ MEZŐ: Esemény borítóképe
+        String bannerUrl,
+
+        // --- ÚJ MEZŐK: ÉTKEZÉSI IDŐSÁVOK ---
+        @JsonFormat(pattern = "HH:mm") LocalTime breakfastStartTime,
+        @JsonFormat(pattern = "HH:mm") LocalTime breakfastEndTime,
+
+        @JsonFormat(pattern = "HH:mm") LocalTime lunchStartTime,
+        @JsonFormat(pattern = "HH:mm") LocalTime lunchEndTime,
+
+        @JsonFormat(pattern = "HH:mm") LocalTime dinnerStartTime,
+        @JsonFormat(pattern = "HH:mm") LocalTime dinnerEndTime,
+        // -----------------------------------
 
         @Valid
         List<WorkAreaDTO> workAreas,

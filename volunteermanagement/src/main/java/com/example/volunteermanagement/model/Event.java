@@ -9,6 +9,7 @@ import org.hibernate.annotations.SQLDelete;
 import org.hibernate.annotations.SQLRestriction;
 
 import java.time.LocalDateTime;
+import java.time.LocalTime; // <-- ÚJ IMPORT
 import java.util.ArrayList;
 import java.util.List;
 
@@ -43,14 +44,34 @@ public class Event {
     @JsonFormat(pattern = "yyyy-MM-dd'T'HH:mm:ss")
     private LocalDateTime endTime;
 
-    // --- ÚJ: JELENTKEZÉSI HATÁRIDŐ ÉS KÉZI KAPCSOLÓ ---
     @JsonFormat(pattern = "yyyy-MM-dd'T'HH:mm:ss")
     private LocalDateTime applicationDeadline;
 
     @Builder.Default
     @Column(nullable = false)
     private boolean isRegistrationOpen = true;
-    // --------------------------------------------------
+
+    // =========================================================
+    // ÚJ: ÉTKEZÉSI IDŐSÁVOK (Napi ismétlődés, ezért LocalTime)
+    // =========================================================
+    @JsonFormat(pattern = "HH:mm")
+    private LocalTime breakfastStartTime;
+
+    @JsonFormat(pattern = "HH:mm")
+    private LocalTime breakfastEndTime;
+
+    @JsonFormat(pattern = "HH:mm")
+    private LocalTime lunchStartTime;
+
+    @JsonFormat(pattern = "HH:mm")
+    private LocalTime lunchEndTime;
+
+    @JsonFormat(pattern = "HH:mm")
+    private LocalTime dinnerStartTime;
+
+    @JsonFormat(pattern = "HH:mm")
+    private LocalTime dinnerEndTime;
+    // =========================================================
 
     @Column(name = "deleted_at")
     private LocalDateTime deletedAt;
@@ -70,7 +91,6 @@ public class Event {
     @JsonIgnore
     private List<EventTeamMember> teamMembers = new ArrayList<>();
 
-    // A többi mező alá...
     @Column(name = "banner_url")
     private String bannerUrl;
 }

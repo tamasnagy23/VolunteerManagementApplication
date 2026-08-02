@@ -48,11 +48,14 @@ interface EventData {
     workAreas: WorkArea[];
 }
 
+// --- JAVÍTVA: Hozzáadva a két új Catering jogosultság ---
 const AVAILABLE_PERMISSIONS = [
     { value: 'MANAGE_APPLICATIONS', label: 'Jelentkezések elbírálása' },
     { value: 'MANAGE_SHIFTS', label: 'Műszakok és Naptár kezelése' },
     { value: 'ASSIGN_VOLUNTEERS', label: 'Önkéntesek beosztása' },
-    { value: 'EDIT_EVENT_DETAILS', label: 'Esemény adatainak szerkesztése' }
+    { value: 'EDIT_EVENT_DETAILS', label: 'Esemény adatainak szerkesztése' },
+    { value: 'MANAGE_CATERING_GLOBAL', label: 'Étkeztetés (Globális - minden terület)' },
+    { value: 'MANAGE_CATERING_LOCAL', label: 'Étkeztetés (Lokális - csak a kezelt területek)' }
 ];
 
 const getAvatarUrl = (url?: string | null) => {
@@ -332,7 +335,7 @@ export default function EventTeamManager() {
                             sx={{ bgcolor: isDarkMode ? 'rgba(0,0,0,0.2)' : 'white', borderRadius: 2 }}
                         >
                             <MenuItem value="ALL">Összes résztvevő</MenuItem>
-                            <MenuItem value="ORGANIZER">Főszervezők (Adminek is)</MenuItem>
+                            <MenuItem value="ORGANIZER">Főszervezők (Adminok is)</MenuItem>
                             <MenuItem value="COORDINATOR">Koordinátorok</MenuItem>
                             <MenuItem value="MEAL_SCANNER">Pultosok (Szkennerek)</MenuItem>
                             <MenuItem value="VOLUNTEER">Sima Önkéntesek</MenuItem>
@@ -360,7 +363,7 @@ export default function EventTeamManager() {
                                     const isUneditable = Boolean(member.isSysAdmin) || member.orgRole === 'OWNER' || member.orgRole === 'ORGANIZER';
 
                                     return (
-                                        <Grid size={{xs:12}} key={member.userId}>
+                                        <Grid size={{xs: 12}} key={member.userId}>
                                             <Card
                                                 elevation={0}
                                                 sx={{
@@ -635,8 +638,12 @@ export default function EventTeamManager() {
 
                                 <Divider sx={{ my: 3, borderColor: isDarkMode ? 'rgba(255,255,255,0.1)' : '#bae6fd' }} />
 
-                                <Typography variant="subtitle2" color={isDarkMode ? '#38bdf8' : 'info.main'} fontWeight="900" mb={2} sx={{ textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                                {/* JAVÍTVA: Magyarázó szöveg hozzáadva a lokális jogosultságok tisztázására */}
+                                <Typography variant="subtitle2" color={isDarkMode ? '#38bdf8' : 'info.main'} fontWeight="900" mb={0.5} sx={{ textTransform: 'uppercase', letterSpacing: '0.5px' }}>
                                     Kezelt Munkaterületek
+                                </Typography>
+                                <Typography variant="caption" color="text.secondary" display="block" mb={2}>
+                                    A fenti "Lokális" jogosultságok (pl. Étkeztetés) csak az itt kiválasztott területekre fognak vonatkozni!
                                 </Typography>
                                 <FormControl fullWidth size="small">
                                     <InputLabel id="areas-select-label">Munkaterületek kijelölése</InputLabel>

@@ -56,7 +56,7 @@ export default function GlobalQrFab() {
         const fetchAllowedEvents = async () => {
             setIsLoadingEvents(true);
             try {
-                const res = await api.get('/events/scanner-allowed');
+                const res = await api.get('/meals/scanner-events');
 
                 const validEvents: EventOption[] = Array.isArray(res.data)
                     ? res.data
